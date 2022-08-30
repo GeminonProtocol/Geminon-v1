@@ -1,0 +1,2 @@
+@openzeppelin/=C:/Users/Rik/.brownie/packages/OpenZeppelin/openzeppelin-contracts@4.5.0
+@chainlink/=C:/Users/Rik/.brownie/packages/smartcontractkit/chainlink-brownie-contracts@0.2.2
