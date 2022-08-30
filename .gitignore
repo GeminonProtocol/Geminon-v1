@@ -1,0 +1,12 @@
+__pycache__
+.env
+.history
+.idea/
+.hypothesis/
+.pytest_cache/
+.vscode/
+build/
+reports/
+scripts/
+brownie-config.yaml
+remappings.txt
