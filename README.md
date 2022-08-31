@@ -13,13 +13,13 @@ The address of the GEX token is the same on the three chains:
 ### Genesis Liquidity Pools
 There are four pools in Ethereum, and two pools in BSC and Avalanche. The addresses of the native asset pool of each chain and the bitcoin pool are also the same:
 
-#### Ethereum network
+#### Ethereum
 * ETH-GEX pool: 0xE38D693A1AE6CE36625191ca6F225615da589529
 * RENBTC-GEX pool: 0x4ACad9691D43DBAf0bBA5A8d2E668e39910015De
 * PAXG-GEX pool: 0x239A9157b3Ed91BF4467D707473E194920A2C21D
 * XAUT-GEX pool: 0xc8024fB5C7beD98CcE0e498E54B7D89816B3521B
 
-#### BNB chain
+#### BNB Smart Chain
 * BNB-GEX pool: 0xE38D693A1AE6CE36625191ca6F225615da589529
 * RENBTC-GEX pool: 0x4ACad9691D43DBAf0bBA5A8d2E668e39910015De
 
