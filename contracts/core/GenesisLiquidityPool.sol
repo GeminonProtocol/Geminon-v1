@@ -500,7 +500,7 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         require(collateral.transferFrom(msg.sender, address(this), inCollatAmount));
         
         if (outGEXAmount == amountMinted)
-            GEX.mint(msg.sender, amountMinted);
+            GEX.mint(msg.sender, outGEXAmount);
         else {
             GEX.mint(address(this), amountMinted);
             require(GEX.transfer(msg.sender, outGEXAmount));
@@ -527,10 +527,10 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         _updateOracle(inGEXAmount);
 
         if (inGEXAmount == amountBurned)
-            GEX.burn(msg.sender, amountBurned);
+            GEX.burn(msg.sender, inGEXAmount);
         else {
-            GEX.burn(address(this), amountBurned);
             require(GEX.transferFrom(msg.sender, address(this), inGEXAmount));
+            GEX.burn(address(this), amountBurned);
         }
         require(collateral.transfer(msg.sender, outCollateralAmount));
     }
@@ -730,7 +730,10 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         collatQuote = collateralQuote();
         gexQuote = GEXQuote();
         
-        outGEXAmount = amountOutGEX(inCollatAmount);
+        if (balanceCollateral == 0) 
+            outGEXAmount = 0;
+        else
+            outGEXAmount = amountOutGEX(inCollatAmount);
         fee = variableFee(outGEXAmount, baseMintFee);
         feeAmount = amountFeeMint(outGEXAmount);
         outGEXAmount -= feeAmount;
@@ -899,7 +902,7 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
 
     /// @dev Calculates the ratio to mint GEX. Uses 6 decimals.
     function _mintRatio() private view returns(uint256) {
-        uint256 mintRatio = (_supplyRatio() * _poolWeightRatio()) / 1e6;
+        uint256 mintRatio = (_supplyRatio() * 1e6) / _poolWeightRatio();
         
         mintRatio = mintRatio > minMintRate ? mintRatio : minMintRate;
         mintRatio = mintRatio < 2e6 ? mintRatio : 2e6;
@@ -920,12 +923,14 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
     /// @dev Modifies the amount to mint / burn to keep linear growth against
     /// the amount of collateral in the pool. Uses 6 decimals.
     function _supplyRatio() private view returns(uint256 supplyRatio) {
+        uint256 surplus;
         if (address(oracleGeminon) == address(0)) {
             int256 poolSupply_ = _toInt256(poolSupply);
-            supplyRatio = uint256(1e6 + ((poolSupply_ - mintedGEX) * 1e6) / poolSupply_);
+            surplus = poolSupply_ > mintedGEX ? uint256(poolSupply_ - mintedGEX) : 0;
+            supplyRatio = 1e6 + (surplus * 1e6) / poolSupply;
         } else {
             uint256 totalMinted = oracleGeminon.getTotalMintedGEX();
-            uint256 surplus = targetSupply > totalMinted ? targetSupply - totalMinted : 0;
+            surplus = targetSupply > totalMinted ? targetSupply - totalMinted : 0;
             supplyRatio = 1e6 + (surplus * 1e6) / targetSupply;
         }
         
@@ -936,17 +941,20 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
     /// @dev Modifies the amount to mint / burn to keep collateral weight between 
     /// pools. Uses 6 decimals.
     function _poolWeightRatio() private view returns(uint256) {
+        if (address(oracleGeminon) == address(0))
+            return 1e6;
+
         uint256 totalValue = oracleGeminon.getTotalCollatValue();
         uint256 poolValue = getCollateralValue();
-        
+
         if (totalValue == 0 || poolValue == 0) 
             return 1e6;
         
-        uint256 actualWeight = (poolValue * 1e3) / totalValue;
-        uint256 weightRatio = (actualWeight * 1e6) / poolWeight;
+        uint256 actualWeight = (poolValue * 1e9) / totalValue;
+        uint256 weightRatio = actualWeight / poolWeight;
         
-        weightRatio = weightRatio > 50*1e4 ? weightRatio : 50*1e4;
-        weightRatio = weightRatio < 200*1e4 ? weightRatio : 200*1e4;
+        weightRatio = weightRatio > 75*1e4 ? weightRatio : 75*1e4;
+        weightRatio = weightRatio < 125*1e4 ? weightRatio : 125*1e4;
         
         return weightRatio;
     }

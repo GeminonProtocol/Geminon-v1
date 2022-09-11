@@ -128,7 +128,7 @@ contract GenesisLiquidityPoolNative is GenesisLiquidityPool {
         outGEXAmount -= fee;
 
         if (outGEXAmount == amountMinted)
-            GEX.mint(msg.sender, amountMinted);
+            GEX.mint(msg.sender, outGEXAmount);
         else {
             GEX.mint(address(this), amountMinted);
             require(GEX.transfer(msg.sender, outGEXAmount));
@@ -154,10 +154,10 @@ contract GenesisLiquidityPoolNative is GenesisLiquidityPool {
         _updateOracle(inGEXAmount);
 
         if (inGEXAmount == amountBurned)
-            GEX.burn(msg.sender, amountBurned);
+            GEX.burn(msg.sender, inGEXAmount);
         else {
-            GEX.burn(address(this), amountBurned);
             require(GEX.transferFrom(msg.sender, address(this), inGEXAmount));
+            GEX.burn(address(this), amountBurned);
         }
         payable(msg.sender).transfer(outCollateralAmount);
     }

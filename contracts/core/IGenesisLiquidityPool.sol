@@ -6,6 +6,8 @@ import "./ICollectible.sol";
 
 interface IGenesisLiquidityPool is ICollectible {
 
+    // +++++++++++++++++++  PUBLIC STATE VARIABLES  +++++++++++++++++++++++++
+
     function poolWeight() external view returns(uint16);
     
     function balanceCollateral() external view returns(uint256);
@@ -27,6 +29,8 @@ interface IGenesisLiquidityPool is ICollectible {
     function isRemoveRequested() external view returns(bool);    
     
 
+    // ++++++++++++++++++++++++++  MIGRATION  +++++++++++++++++++++++++++++++
+
     function receiveMigration(uint256 amountGEX, uint256 amountCollateral, uint256 initMintedAmount) external;
 
     function bailoutMinter() external returns(uint256);
@@ -36,6 +40,15 @@ interface IGenesisLiquidityPool is ICollectible {
     function repayCollateral(uint256 amount) external returns(uint256);
 
     
+    // ++++++++++++++++++++++++  USE FUNCTIONS  +++++++++++++++++++++++++++++
+    
+    function mintSwap(uint256 inCollatAmount, uint256 minOutGEXAmount) external;
+
+    function redeemSwap(uint256 inGEXAmount, uint256 minOutCollatAmount) external;
+    
+    
+    // ++++++++++++++++++++  INFORMATIVE FUNCTIONS  +++++++++++++++++++++++++
+
     function collateralPrice() external view returns(uint256);
 
     function collateralQuote() external view returns(uint256);
