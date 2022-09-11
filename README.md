@@ -7,25 +7,25 @@ The protocol is deployed on Ethereum, BNB and Avalanche networks. Always check t
 
 ### GEX token
 The address of the GEX token is the same on the three chains:  
-0x2743Bb6962fb1D7d13C056476F3Bc331D7C3E112
+* 0x2743Bb6962fb1D7d13C056476F3Bc331D7C3E112
 
 
 ### Genesis Liquidity Pools
 There are four pools in Ethereum, and two pools in BSC and Avalanche. The addresses of the native asset pool of each chain and the bitcoin pool are also the same:
 
 #### Ethereum
-* ETH-GEX pool: 0xE38D693A1AE6CE36625191ca6F225615da589529
-* RENBTC-GEX pool: 0x4ACad9691D43DBAf0bBA5A8d2E668e39910015De
-* PAXG-GEX pool: 0x239A9157b3Ed91BF4467D707473E194920A2C21D
-* XAUT-GEX pool: 0xc8024fB5C7beD98CcE0e498E54B7D89816B3521B
+* ETH-GEX pool: 0xA4df7a003303552AcDdF550A0A65818c4A218315
+* RENBTC-GEX pool: 0xA782893006050ba4599558bF842Da3DB7225A00c
+* PAXG-GEX pool: 0x48A814C44beeFE3A1C7c165367c1Ea12eA599b48
+* XAUT-GEX pool: 0x9aFEf3344369943509b8E2103F9eC312f014d424
 
 #### BNB Smart Chain
-* BNB-GEX pool: 0xE38D693A1AE6CE36625191ca6F225615da589529
-* RENBTC-GEX pool: 0x4ACad9691D43DBAf0bBA5A8d2E668e39910015De
+* BNB-GEX pool: 0xA4df7a003303552AcDdF550A0A65818c4A218315
+* RENBTC-GEX pool: 0xA782893006050ba4599558bF842Da3DB7225A00c
 
 #### Avalanche
-* AVAX-GEX pool: 0xE38D693A1AE6CE36625191ca6F225615da589529
-* BTC.B-GEX pool: 0x4ACad9691D43DBAf0bBA5A8d2E668e39910015De
+* AVAX-GEX pool: 0xA4df7a003303552AcDdF550A0A65818c4A218315
+* BTC.B-GEX pool: 0xA782893006050ba4599558bF842Da3DB7225A00c
 
 
 ### Collateral
@@ -43,3 +43,13 @@ GEX token is fully collateralized with gold, Bitcoin, Ethereum, BNB and AVAX. We
 * 10% Avalanche (AVAX)  
 
 The total weight of collateral on each network is therefore: 60% Ethereum, 20% BNB and 20% Avalanche.
+
+
+### Oracle
+The Geminon Oracle is used by other contracts for coordination, information and safety checks. It is a critical part of the protocol. Its address is the same on the three chains:
+* 0x2208C74e717df65E367A7dB03B8675627D31ac31
+
+
+### Arbitrage bridge v0
+In order to keep the prices between chains coordinated, we have set up an internal bridge to perform arbitrage. This bridge is temporary, and will be deprecated as soon as the integration of a public bridge is complete.
+* 0xC783565D32517DCC80d0aAA44580ef92dAd224e3
