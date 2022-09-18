@@ -2,7 +2,7 @@
 """
 Created on Fri Jul 22 19:44:23 2022
 
-@author: Rik
+@author: Geminon
 """
 
 from brownie import accounts, reverts, convert
@@ -20,24 +20,23 @@ from pytest import fixture
 
 import numpy as np
 
-
 chain = Chain()
 
 ZERO_ADDRESS = convert.to_address('0x' + '0'*40)
 
 
-deploy_args = {'V3Aggregator': [8, 1800*1e8],  # uint8 _decimals, int256 _initialAnswer
+deploy_args = {'V3Aggregator': [8, 1600*1e8],  # uint8 _decimals, int256 _initialAnswer
                'GEX': [],  #
-               'Token': [1e15, 'PAX Gold', "PAXG"],  # uint64 amountMinted, string name, string symbol
+               'Token': [1e15, 'Tether Gold', "XAUT", 6],  # uint64 amountMinted, string name, string symbol, uint8 decimals
                'GenLiqPool': [None, # gexToken address of the GEX token contract
                               None, # collatToken address of the collateral token contract
                               500, # poolWeight_ integer percentage 3 decimals [1, 1000] (1e3)
-                              0.01 * 1e18, # initPoolPrice_ must be in 1e18 USD units
+                              0.001 * 1e18, # initPoolPrice_ must be in 1e18 USD units
                              ],
-               'V3Aggregator2': [8, 22000*1e8],  # uint8 _decimals, int256 _initialAnswer
-               'Token2': [1e14, 'renBTC', "renBTC"],  # uint64 amountMinted, string name, string symbol
+               'V3Aggregator2': [8, 1600*1e8],  # uint8 _decimals, int256 _initialAnswer
+               'Token2': [1e15, 'PAX Gold', "PAXG", 18],  # uint64 amountMinted, string name, string symbol, uint8 decimals
                'GeminonOracle': [[]], # address[] pools
-               'SCMinter': [None, None, None, ZERO_ADDRESS],  # address gexToken, address usdiToken, address oracle, address pool
+               'SCMinter': [None, None, None],  # address gexToken, address usdiToken, address oracle, address pool
                'USDI': ['USDI', "USDI"],  # uint64 amountMinted, string name, string symbol
               }
 
@@ -76,8 +75,9 @@ def contract_pricefeed2():
 def contract_token():
     
     contract = MockERC20.deploy(*deploy_args['Token'], {"from": accounts[0]})
+    decimals = deploy_args['Token'][3]
     for i in range(8):
-        contract.transfer(accounts[i+1], 1e6*1e18, {"from": accounts[0]})
+        contract.transfer(accounts[i+1], 1e6 * 10**decimals, {"from": accounts[0]})
     
     return contract
 
@@ -86,8 +86,9 @@ def contract_token():
 def contract_token2():
     
     contract = MockERC20.deploy(*deploy_args['Token2'], {"from": accounts[0]})
+    decimals = deploy_args['Token2'][3]
     for i in range(8):
-        contract.transfer(accounts[i+1], 1e5*1e18, {"from": accounts[0]})
+        contract.transfer(accounts[i+1], 1e6 * 10**decimals, {"from": accounts[0]})
     
     return contract
 
@@ -145,12 +146,11 @@ def contract_oracle(contract_glp, contract_glp2):
 
 
 @fixture(scope='module')
-def contract_scminter(contract_gex, contract_oracle, contract_glp, contract_usdi):
+def contract_scminter(contract_gex, contract_oracle, contract_usdi):
     
     deploy_args['SCMinter'][0] = contract_gex.address
     deploy_args['SCMinter'][1] = contract_usdi.address
     deploy_args['SCMinter'][2] = contract_oracle.address
-    deploy_args['SCMinter'][3] = contract_glp.address
     
     return SCMinter.deploy(*deploy_args['SCMinter'], 
                            {"from": accounts[0]})
@@ -347,6 +347,9 @@ def test_setPoolWeight(contract_glp, contract_glp2,
     
     prev_weight = contract_glp.poolWeight()
     
+    assert prev_weight == deploy_args['GenLiqPool'][2]
+    
+    
     with reverts('dev: invalid weight value'):
         contract_glp.setPoolWeight(0, {"from": accounts[0]})
         
@@ -361,30 +364,34 @@ def test_setPoolWeight(contract_glp, contract_glp2,
         
     
     contract_token.approve(contract_glp.address, 2**256-1, {"from": arb_addr})
-    contract_glp.mintSwap(1*1e18, 0, {"from": arb_addr})
-    oracle_pool_weight1 = contract_oracle.getPoolCollatWeight(contract_glp.address)
+    contract_glp.mintSwap(1 * 1e18, 0, {"from": arb_addr})
+    oracle_pool_weight1 = contract_oracle.getPoolCollatWeight(contract_glp.address) / 1e15
     
     assert contract_glp.balanceCollateral() > 0
     assert oracle_pool_weight1 != 0
     
     
     contract_token2.approve(contract_glp2.address, 2**256-1, {"from": arb_addr2})
-    contract_glp2.mintSwap(0.1*1e18, 0, {"from": arb_addr2})
-    oracle_pool_weight2 = contract_oracle.getPoolCollatWeight(contract_glp2.address)
+    contract_glp2.mintSwap(1 * 1e18, 0, {"from": arb_addr2})
+    oracle_pool_weight2 = contract_oracle.getPoolCollatWeight(contract_glp2.address) / 1e15
     
     assert contract_glp2.balanceCollateral() > 0
     assert oracle_pool_weight2 != 0
     
     new_weight = prev_weight - 50
-    contract_glp.setPoolWeight(new_weight, {"from": accounts[0]})
-    
     expected_poolsupply = round(100000000 * new_weight / 1000) * int(1e18)
     
+    contract_glp.setPoolWeight(new_weight, {"from": accounts[0]})
+        
     assert contract_glp.poolSupply() == expected_poolsupply
+    assert contract_glp.poolWeight() == deploy_args['GenLiqPool'][2] - 50
     
+    actualWeight = (contract_glp.getCollateralValue() *1e3) / contract_oracle.getTotalCollatValue();
+    print(actualWeight, contract_glp.poolWeight())
+    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
     
-    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
-    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
+    assert contract_glp.poolWeight() == deploy_args['GenLiqPool'][2] - 100
+    
     with reverts('dev: oracle weight change too big'):
         contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
     
@@ -775,6 +782,15 @@ def test_amountOutGEX(contract_glp, contract_token, contract_oracle, amount):
     
     with_tradeInit(contract_glp, contract_token, contract_oracle)
     
+    
+    # mintratio = contract_glp._mintRatio()
+    # burnratio = contract_glp._burnRatio()
+    
+    # assert mintratio >= int(1e6)
+    # assert mintratio <= int(2*1e6)
+    # assert burnratio >= int(1e6)
+    # assert burnratio <= int(2*1e6)
+    
     assert contract_glp.amountMint(amount) >= 0
     assert contract_glp.amountBurn(amount) >= 0
     
@@ -790,6 +806,15 @@ def test_amountOutCollateral(contract_glp, contract_token, contract_oracle, amou
     chain.snapshot()
     
     with_some_prev_mints(contract_glp, contract_token, contract_oracle)
+    
+    
+    # mintratio = contract_glp._mintRatio()
+    # burnratio = contract_glp._burnRatio()
+    
+    # assert mintratio >= int(1e6)
+    # assert mintratio <= int(2*1e6)
+    # assert burnratio >= int(1e6)
+    # assert burnratio <= int(2*1e6)
     
     assert contract_glp.amountMint(amount) >= 0
     assert contract_glp.amountBurn(amount) >= 0
@@ -809,8 +834,14 @@ def test_mint_limits(contract_glp, contract_gex, contract_token, contract_oracle
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
+    decimals = deploy_args['Token'][3]
     amount = 1*1e15
     for i in range(400):
+        print('\n',i)
+        print(f'Balance token sender: {contract_token.balanceOf(accounts[0])/10**(18-decimals)}')
+        print(f'Amount: {amount / 1e18}')
+        print(f'Total minted GEX: {contract_glp.mintedGEX()/1e18}')
+        print(f'Total collat value: {contract_glp.getCollateralValue()/1e18}')
         chain.sleep(300*i)
         chain.mine()
         contract_glp.mintSwap(amount, 0, {"from": accounts[0]})
@@ -831,6 +862,7 @@ def test_mintSwap_redeemSwap(contract_glp, contract_gex, contract_token, contrac
     contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(50):
+        print(i)
         chain.sleep(3600*3)
         chain.mine()
         contract_glp.mintSwap(10*1e18, 0, {"from": accounts[0]})
@@ -838,8 +870,14 @@ def test_mintSwap_redeemSwap(contract_glp, contract_gex, contract_token, contrac
     
     balanceGEX = contract_gex.balanceOf(accounts[0])
     amount = int(balanceGEX / 51)
+    decimals = deploy_args['Token'][3]
     
     for i in range(50):
+        print(i)
+        print(contract_gex.balanceOf(accounts[0])/1e18)
+        print(amount/1e18)
+        print(contract_token.balanceOf(contract_glp.address)/10**(18-decimals))
+        print(contract_glp.amountOutCollateral(amount)/1e18)
         chain.sleep(600)
         chain.mine()
         contract_glp.redeemSwap(amount, 0, {"from": accounts[0]})
@@ -855,10 +893,13 @@ def test_mintRedeem_alt(contract_glp, contract_gex, contract_token, contract_ora
     
     with_tradeInit(contract_glp, contract_token, contract_oracle)
     
+    
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(100):
+        print(i)
+        
         contract_glp.mintSwap(10*1e18, 0, {"from": accounts[0]})
         chain.sleep(3600)
         chain.mine()
@@ -874,11 +915,13 @@ def test_mintRedeem_rand(contract_glp, contract_gex, contract_token, contract_or
     chain.snapshot()
     
     with_some_prev_mints(contract_glp, contract_token, contract_oracle)
+  
     
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(100):
+        print(i)
         op = np.random.choice([0,1])
         
         if op > 0:
@@ -888,10 +931,12 @@ def test_mintRedeem_rand(contract_glp, contract_gex, contract_token, contract_or
         else:
             balance = int(contract_gex.balanceOf(accounts[0]) / 1e18)
             amount = np.random.randint(0, balance) * int(1e18)
+
             contract_glp.redeemSwap(amount, 0, {"from": accounts[0]})
         
         chain.sleep(np.random.randint(1, 10000))
         chain.mine()
+
             
     chain.revert()
             
@@ -911,6 +956,7 @@ def test_multiPool_rand(contract_glp, contract_glp2, contract_gex,
     contract_token2.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(500):
+        print(i)
         op = np.random.choice([0,1])
         pool = np.random.choice([0,1])
         
@@ -937,7 +983,8 @@ def test_multiPool_rand(contract_glp, contract_glp2, contract_gex,
         
         chain.sleep(3600*6)
         chain.mine()
-        
+
+            
     chain.revert()
 
 
@@ -976,8 +1023,10 @@ def test_matchBalances(contract_glp, contract_gex, contract_token):
     with reverts('dev: Balances match'):
         contract_glp.matchBalances({"from": accounts[0]})
     
+    decimals = deploy_args['Token'][3]
+    
     assert contract_glp.balanceGEX() >= contract_gex.balanceOf(contract_glp.address)
-    assert contract_glp.balanceCollateral() == contract_token.balanceOf(contract_glp.address)    
+    assert contract_glp.balanceCollateral() == contract_token.balanceOf(contract_glp.address) / 10**(18-decimals)
     
 
 
@@ -1095,18 +1144,19 @@ def test_lendCollateral(contract_glp, contract_token, contract_scminter,
     chain.sleep(3600*24*31)
     chain.mine()
     
+    decimals = deploy_args['Token'][3]
     balance_collat = contract_glp.balanceCollateral()
     
     tx = contract_glp.lendCollateral(balance_collat, {"from": lender_addr})
     
     assert tx.return_value == contract_glp.balanceLent()
-    assert contract_token.allowance(contract_glp.address, lender_addr) == contract_glp.balanceLent()
+    assert contract_token.allowance(contract_glp.address, lender_addr) == contract_glp.balanceLent() / 10**(18-decimals)
     
     
-    contract_token.transferFrom(contract_glp.address, lender_addr, tx.return_value, 
+    contract_token.transferFrom(contract_glp.address, lender_addr, tx.return_value / 10**(18-decimals), 
                                 {"from": lender_addr})
     
-    assert contract_token.balanceOf(lender_addr) >= contract_glp.balanceLent()
+    assert contract_token.balanceOf(lender_addr) >= contract_glp.balanceLent() / 10**(18-decimals)
     
     chain.revert()
 
@@ -1287,14 +1337,16 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     chain.snapshot()
     
+    decimals = deploy_args['Token'][3]
     new_addr = contract_glp3.address
+    
     assert contract_glp3.collateralPrice()
     assert contract_glp3.balanceGEX() == 0
     assert contract_glp3.balanceCollateral() == 0
     assert contract_glp3.getCollateralValue() == 0
     
     assert contract_glp.balanceGEX() >= contract_gex.balanceOf(contract_glp.address)
-    assert contract_glp.balanceCollateral() == contract_token.balanceOf(contract_glp.address)
+    assert contract_glp.balanceCollateral() / 10**(18-decimals) == contract_token.balanceOf(contract_glp.address)
     
     with reverts():
         contract_glp.requestMigration(new_addr, {"from": accounts[0]})
@@ -1302,9 +1354,12 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     with_some_prev_mints(contract_glp, contract_token, contract_oracle)
     with_some_prev_mints(contract_glp2, contract_token2, contract_oracle)
-    with_reduce_pool_weight(49, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(49, contract_glp, contract_glp2, contract_oracle, contract_gex)
     
     with_setOracle(contract_glp3, contract_oracle)
+    contract_oracle.requestAddAddress(contract_glp3.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_oracle.addPool(contract_glp3.address, {"from": accounts[0]})
     chain.sleep(3600*24*31)
     chain.mine()
@@ -1312,13 +1367,17 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     assert contract_glp.poolWeight() < 50
     
     
+    contract_oracle.requestAddressChange(contract_glp.address, contract_glp3.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_glp.requestMigration(new_addr, {"from": accounts[0]})
+    expected_time = chain.time()
     
     with reverts("Mint paused"):
         contract_glp.mintSwap(1e18, 0, {"from": accounts[0]})
     
     assert contract_glp.isMigrationRequested() == True
-    assert abs(contract_glp.timestampMigrationRequest() - chain.time()) <= 2
+    assert abs(contract_glp.timestampMigrationRequest() - expected_time) <= 2
     assert contract_glp.migrationPool() == contract_glp3.address
     assert contract_glp.isMintPaused() == True
     assert contract_oracle.isAnyPoolMigrating() == True
@@ -1328,7 +1387,7 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     with reverts():
         contract_glp.migratePool({"from": accounts[0]})
         
-    with_reduce_pool_weight(19, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(19, contract_glp, contract_glp2, contract_oracle, contract_gex)
     chain.sleep(3600*24*31)
     chain.mine()
     
@@ -1350,7 +1409,7 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     assert contract_glp3.balanceCollateral() == transfer_balance_collat
     assert contract_glp3.initMintedAmount() == init_minted_amount
     assert contract_gex.balanceOf(contract_glp3.address) == transfer_balance_gex
-    assert contract_token.balanceOf(contract_glp3.address) == transfer_balance_collat
+    assert contract_token.balanceOf(contract_glp3.address) == transfer_balance_collat / 10**(18-decimals)
     
     
     assert contract_oracle.isAnyPoolMigrating() == False
@@ -1368,8 +1427,10 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     chain.snapshot()
     
+    decimals = deploy_args['Token'][3]
+    
     assert contract_glp.balanceGEX() >= contract_gex.balanceOf(contract_glp.address)
-    assert contract_glp.balanceCollateral() == contract_token.balanceOf(contract_glp.address)
+    assert contract_glp.balanceCollateral() / 10**(18-decimals) == contract_token.balanceOf(contract_glp.address)
     
     
     with reverts():
@@ -1378,20 +1439,24 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     with_some_prev_mints(contract_glp, contract_token, contract_oracle)
     with_some_prev_mints(contract_glp2, contract_token2, contract_oracle)
-    with_reduce_pool_weight(45, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(45, contract_glp, contract_glp2, contract_oracle, contract_gex)
     
     assert contract_glp.poolWeight() < 50
     
     chain.sleep(3600*24*31)
     chain.mine()
     
+    contract_oracle.requestRemoveAddress(contract_glp.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_glp.requestRemove({"from": accounts[0]})
+    expected_time = chain.time()
     
     with reverts("Mint paused"):
         contract_glp.mintSwap(1e18, 0, {"from": accounts[0]})
     
+    assert abs(contract_glp.timestampMigrationRequest() - expected_time) <= 2
     assert contract_glp.isRemoveRequested() == True
-    assert abs(contract_glp.timestampMigrationRequest() - chain.time()) <= 1
     assert contract_glp.isMintPaused() == True
     assert contract_oracle.isAnyPoolRemoving() == True
     assert contract_oracle.isRemovingPool(contract_glp.address) == True
@@ -1400,7 +1465,7 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     with reverts():
         contract_glp.removePool({"from": accounts[0]})
         
-    with_reduce_pool_weight(9, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(9, contract_glp, contract_glp2, contract_oracle, contract_gex)
     chain.sleep(3600*24*31)
     chain.mine()
     
@@ -1432,7 +1497,7 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     chain.revert()
 
 
-def test_pass(contract_glp): pass
+
 
 
 
@@ -1506,9 +1571,11 @@ def with_setSCMinter(contract_glp, contract_scminter):
 
 def with_setOracle(contract_glp, contract_oracle):
     
-    contract_glp.setOracle(contract_oracle.address, {"from": accounts[0]})
+    if contract_oracle:
     
-    return contract_oracle.address
+        contract_glp.setOracle(contract_oracle.address, {"from": accounts[0]})
+        
+        return contract_oracle.address
     
 
 def with_setArbitrageur(contract_glp):
@@ -1593,28 +1660,32 @@ def with_some_usdi_minted(contract_scminter, contract_glp, contract_token,
 
 
 
-def with_reduce_pool_weight(target_weight, contract_glp, contract_glp2, contract_oracle): 
+def with_reduce_pool_weight(target_weight, contract_glp, contract_glp2, contract_oracle, contract_gex): 
     
-    actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
+    actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address) / 1e15
+    contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     while actual_weight > target_weight:
     
         print(f'Actual weight pool 1: {actual_weight}')
         print(f'Weight pool 1: {contract_glp.poolWeight()}')
         local_target_weight = max(contract_glp.poolWeight() - 49, target_weight)
-        contract_glp.setPoolWeight(local_target_weight, {"from": accounts[0]})
-        contract_glp2.setPoolWeight(contract_glp2.poolWeight() + 50, {"from": accounts[0]})
+        if abs(local_target_weight - actual_weight) < 100:
+            contract_glp.setPoolWeight(local_target_weight, {"from": accounts[0]})
+            contract_glp2.setPoolWeight(contract_glp2.poolWeight() + 50, {"from": accounts[0]})
         
         i = 0
         while actual_weight > local_target_weight:
             i+=1
             print(i)
-            chain.sleep(2*i*3600)
+            chain.sleep(i*3600)
             chain.mine()
-            tx = contract_glp2.mintSwap(i*int(1e17), 0, {"from": accounts[0]})
-            contract_glp.redeemSwap(tx.return_value, 0, {"from": accounts[0]})
-            actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
+            contract_glp2.mintSwap(i*int(1e17), 0, {"from": accounts[0]})
+            contract_glp.redeemSwap(0.1*contract_gex.balanceOf(accounts[0]), 0, {"from": accounts[0]})
+            actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address) / 1e15
     
+    contract_glp.setPoolWeight(actual_weight, {"from": accounts[0]})
+    contract_glp2.setPoolWeight(contract_oracle.getPoolCollatWeight(contract_glp2.address) / 1e15, {"from": accounts[0]})
     print('End reduce weight')
     print(f'Actual weight pool 1: {actual_weight}')
     print(f'Weight pool 1: {contract_glp.poolWeight()}')

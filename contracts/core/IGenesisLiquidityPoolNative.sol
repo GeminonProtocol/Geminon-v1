@@ -9,4 +9,6 @@ interface IGenesisLiquidityPoolNative is IGenesisLiquidityPool {
     function receiveMigrationNative(uint256 amountGEX, uint256 initMintedAmount) external payable;
 
     function repayCollateralNative() external payable returns(uint256);
+
+    function mintSwapNative(uint256 minOutGEXAmount) external payable;
 }

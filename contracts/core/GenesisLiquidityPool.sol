@@ -2,10 +2,10 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "./IGenesisLiquidityPool.sol";
 import "./IGeminonOracle.sol";
+import "../tokens/IERC20Decimals.sol";
 import "../tokens/IERC20ElasticSupply.sol";
 import "../utils/TradePausable.sol";
 import "../utils/TimeLocks.sol";
@@ -20,10 +20,12 @@ import "../utils/TimeLocks.sol";
 contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiquidityPool {
 
     IERC20ElasticSupply internal immutable GEX;
-    IERC20 private immutable collateral;
+    IERC20Decimals private immutable collateral;
 
     IGeminonOracle internal oracleGeminon;
     AggregatorV3Interface private collatPriceFeed;
+
+    uint8 public collatDecimals;
         
     address public scMinter;
     address public treasuryLender;
@@ -76,7 +78,13 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         uint256 initPoolPrice_
     ) {
         GEX = IERC20ElasticSupply(gexToken);
-        collateral = IERC20(collatToken);
+        collateral = IERC20Decimals(collatToken);
+        
+        if (collatToken != address(0)) {
+            collatDecimals = collateral.decimals();
+            require(collatDecimals <= 18);
+        } else
+            collatDecimals = 18;
         
         initPoolPrice = initPoolPrice_;
         poolWeight = poolWeight_;
@@ -378,7 +386,7 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         require((getCollateralValue() *1e3) / oracleGeminon.getTotalCollatValue() < 20); // dev: actual pool weight too high
         
         uint256 amountGEX = GEX.balanceOf(address(this)) - balanceFees;
-        uint256 amountCollateral = collateral.balanceOf(address(this));
+        uint256 uwAmountCollateral = collateral.balanceOf(address(this));
         
         balanceGEX = 0;
         balanceCollateral = 0;
@@ -387,9 +395,9 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         isMigrationRequested = false;
 
         GEX.approve(migrationPool, amountGEX);
-        collateral.approve(migrationPool, amountCollateral);
+        collateral.approve(migrationPool, uwAmountCollateral);
 
-        IGenesisLiquidityPool(migrationPool).receiveMigration(amountGEX, amountCollateral, initMintedAmount);
+        IGenesisLiquidityPool(migrationPool).receiveMigration(amountGEX, uwAmountCollateral, initMintedAmount);
         
         oracleGeminon.setMigrationDone();
     }
@@ -421,7 +429,7 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
 
 
     /// @dev Receive the funds of another pool that is migrating.
-    function receiveMigration(uint256 amountGEX, uint256 amountCollateral, uint256 initMintedAmount_) external {
+    function receiveMigration(uint256 amountGEX, uint256 uwAmountCollateral, uint256 initMintedAmount_) external {
         require(isInitialized); // dev: not initialized
         require(address(oracleGeminon) != address(0)); // dev: oracle is not set
         require(oracleGeminon.isPool(msg.sender)); // dev: sender is not pool
@@ -431,12 +439,14 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
             require(initMintedAmount_ != 0); // dev: null init minted amount
             initMintedAmount = initMintedAmount_;
         }
+        
+        uint256 amountCollateral = uwAmountCollateral * 10**(18-collatDecimals);
         balanceGEX += amountGEX;
         balanceCollateral += amountCollateral;
         mintedGEX += _toInt256(amountGEX);
 
         require(GEX.transferFrom(msg.sender, address(this), amountGEX));
-        require(collateral.transferFrom(msg.sender, address(this), amountCollateral));
+        require(collateral.transferFrom(msg.sender, address(this), uwAmountCollateral));
     }
 
 
@@ -480,9 +490,13 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
 
     /// @notice Swaps Collateral for GEX. Mints a percentage of the
     /// amount of GEX tokens as new supply.
+    /// @dev input amounts must be in 18 decimals format
     function mintSwap(uint256 inCollatAmount, uint256 minOutGEXAmount) external virtual whenMintNotPaused {
         require(balanceGEX > 0); // dev: pool not initialized
-        
+
+        uint256 uwInCollatAmount = inCollatAmount / 10**(18-collatDecimals);
+        inCollatAmount = uwInCollatAmount * 10**(18-collatDecimals);
+
         uint256 outGEXAmount = amountOutGEX(inCollatAmount);
         uint256 fee = amountFeeMint(outGEXAmount);
         require(outGEXAmount - fee >= minOutGEXAmount, "Max slippage");
@@ -497,7 +511,8 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         _updateOracle(outGEXAmount);
         outGEXAmount -= fee;
 
-        require(collateral.transferFrom(msg.sender, address(this), inCollatAmount));
+        
+        require(collateral.transferFrom(msg.sender, address(this), uwInCollatAmount));
         
         if (outGEXAmount == amountMinted)
             GEX.mint(msg.sender, outGEXAmount);
@@ -510,18 +525,22 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
 
     /// @notice Swaps GEX for Collateral. Burns a percentage of the
     /// amount of GEX tokens to reduce supply.
+    /// @dev input amounts must be in 18 decimals format
     function redeemSwap(uint256 inGEXAmount, uint256 minOutCollatAmount) external virtual {
         require(balanceCollateral > 0);
 
         uint256 fee = amountFeeRedeem(inGEXAmount);
-        uint256 outCollateralAmount = amountOutCollateral(inGEXAmount - fee);
-        require(outCollateralAmount >= minOutCollatAmount, "Max slippage");
+        uint256 outCollatAmount = amountOutCollateral(inGEXAmount - fee);
+        require(outCollatAmount >= minOutCollatAmount, "Max slippage");
         uint256 amountBurned = amountBurn(inGEXAmount);
+
+        uint256 uwOutCollatAmount = outCollatAmount / 10**(18-collatDecimals);
+        outCollatAmount = uwOutCollatAmount * 10**(18-collatDecimals);
 
         balanceFees += fee;
         balanceGEX += inGEXAmount;
         balanceGEX -= fee + amountBurned;
-        balanceCollateral -= outCollateralAmount;
+        balanceCollateral -= outCollatAmount;
         mintedGEX -= _toInt256(amountBurned);
 
         _updateOracle(inGEXAmount);
@@ -532,7 +551,9 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
             require(GEX.transferFrom(msg.sender, address(this), inGEXAmount));
             GEX.burn(address(this), amountBurned);
         }
-        require(collateral.transfer(msg.sender, outCollateralAmount));
+
+        
+        require(collateral.transfer(msg.sender, uwOutCollatAmount));
     }
     
 
@@ -560,7 +581,8 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
     /// in the balances is less than 1% to avoid disrupting the pool.
     function matchBalances() virtual external onlyOwner {
         uint256 amountAddrGEX = GEX.balanceOf(address(this));
-        uint256 amountAddrCollat = collateral.balanceOf(address(this));
+        uint256 uwAmountAddrCollat = collateral.balanceOf(address(this));
+        uint256 amountAddrCollat = uwAmountAddrCollat * 10**(18-collatDecimals);
         require(amountAddrGEX != balanceGEX + balanceFees || amountAddrCollat != balanceCollateral); // dev: Balances match
         
         uint256 ratioError1 = (amountAddrGEX * 1e3) / (balanceGEX + balanceFees);
@@ -625,7 +647,8 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         require(amountBorrowed > 0);  // dev: amount borrowed null
         balanceLent += amountBorrowed;
 
-        collateral.approve(treasuryLender, amountBorrowed);
+        uint256 uwAmountBorrowed = amountBorrowed / 10**(18-collatDecimals);
+        collateral.approve(treasuryLender, uwAmountBorrowed);
 
         return amountBorrowed;
     }
@@ -639,7 +662,8 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
         
         balanceLent -= amountRepaid;
 
-        require(collateral.transferFrom(treasuryLender, address(this), amountRepaid));
+        uint256 uwAmountRepaid = amountRepaid / 10**(18-collatDecimals);
+        require(collateral.transferFrom(treasuryLender, address(this), uwAmountRepaid));
         collateral.approve(treasuryLender, 0);
 
         return amountRepaid;
@@ -902,7 +926,7 @@ contract GenesisLiquidityPool is Ownable, TradePausable, TimeLocks, IGenesisLiqu
 
     /// @dev Calculates the ratio to mint GEX. Uses 6 decimals.
     function _mintRatio() private view returns(uint256) {
-        uint256 mintRatio = (_supplyRatio() * 1e6) / _poolWeightRatio();
+        uint256 mintRatio = (_supplyRatio() * _poolWeightRatio()) / 1e6;
         
         mintRatio = mintRatio > minMintRate ? mintRatio : minMintRate;
         mintRatio = mintRatio < 2e6 ? mintRatio : 2e6;

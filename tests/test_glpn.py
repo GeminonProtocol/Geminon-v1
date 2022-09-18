@@ -2,8 +2,14 @@
 """
 Created on Fri Jul 22 19:44:23 2022
 
-@author: Rik
+@author: Geminon
 """
+
+from inspect import getsourcefile
+import os
+import sys
+# Insert this folder into the python path to allow imports from other test scripts
+sys.path.insert(0, os.path.dirname(getsourcefile(lambda:0)))
 
 from brownie import accounts, reverts, convert
 from brownie import (MockV3Aggregator, 
@@ -21,40 +27,19 @@ from pytest import fixture
 
 import numpy as np
 
+from test_glp import deploy_args
+from test_glp import with_setSCMinter, with_setOracle, with_setArbitrageur, with_setLender, with_setCollector
+from test_glp import with_some_prev_mints, with_reduce_pool_weight
 
 chain = Chain()
 
 ZERO_ADDRESS = convert.to_address('0x' + '0'*40)
 
 
-deploy_args = {'V3Aggregator': [8, 1800*1e8],  # uint8 _decimals, int256 _initialAnswer
-               'GEX': [],  #
-               'Token': [1e15, 'PAX Gold', "PAXG"],  # uint64 amountMinted, string name, string symbol
-               'GenLiqPool': [None, # gexToken address of the GEX token contract
-                              None, # collatToken address of the collateral token contract
-                              500, # poolWeight_ integer percentage 3 decimals [1, 1000] (1e3)
-                              0.01 * 1e18, # initPoolPrice_ must be in 1e18 USD units
-                             ],
-               'GenLiqPoolNat': [None, # gexToken address of the GEX token contract
-                                 500, # poolWeight_ integer percentage 3 decimals [1, 1000] (1e3)
-                                 0.01 * 1e18, # initPoolPrice_ must be in 1e18 USD units
-                                ],
-               'V3Aggregator2': [8, 22000*1e8],  # uint8 _decimals, int256 _initialAnswer
-               'Token2': [1e14, 'renBTC', "renBTC"],  # uint64 amountMinted, string name, string symbol
-               'GeminonOracle': [[]], # address[] pools
-               'SCMinter': [None, None, None, ZERO_ADDRESS],  # address gexToken, address usdiToken, address oracle, address pool
-               'USDI': ['USDI', "USDI"],  # uint64 amountMinted, string name, string symbol
-              }
-
-initialize_args = {'GenLiqPool': [1,  # initMintShare integer percentage 3 decimals [1, 1000] (1e3)
-                                  None, # oracle
-                                  None, # priceFeed address of the collateral token price feed contract
-                                  ZERO_ADDRESS, # scMinter_
-                                  ZERO_ADDRESS, # treasuryLender_
-                                  ZERO_ADDRESS, # feesCollector_
-                                  ZERO_ADDRESS, # arbitrageur_
-                                 ],}
-
+deploy_args['GenLiqPoolNat'] = [None, # gexToken address of the GEX token contract
+                                500, # poolWeight_ integer percentage 3 decimals [1, 1000] (1e3)
+                                0.001 * 1e18, # initPoolPrice_ must be in 1e18 USD units
+                                ]
 
 
 @fixture(scope='module')
@@ -78,21 +63,12 @@ def contract_pricefeed2():
 
 
 @fixture(scope='module')
-def contract_token():
-    
-    contract = MockERC20.deploy(*deploy_args['Token'], {"from": accounts[0]})
-    for i in range(8):
-        contract.transfer(accounts[i+1], 1e6*1e18, {"from": accounts[0]})
-    
-    return contract
-
-
-@fixture(scope='module')
 def contract_token2():
     
     contract = MockERC20.deploy(*deploy_args['Token2'], {"from": accounts[0]})
+    decimals = deploy_args['Token2'][3]
     for i in range(8):
-        contract.transfer(accounts[i+1], 1e5*1e18, {"from": accounts[0]})
+        contract.transfer(accounts[i+1], 1e6 * 10**decimals, {"from": accounts[0]})
     
     return contract
 
@@ -148,12 +124,11 @@ def contract_oracle(contract_glp, contract_glp2):
 
 
 @fixture(scope='module')
-def contract_scminter(contract_gex, contract_oracle, contract_glp, contract_usdi):
+def contract_scminter(contract_gex, contract_oracle, contract_usdi):
     
     deploy_args['SCMinter'][0] = contract_gex.address
     deploy_args['SCMinter'][1] = contract_usdi.address
     deploy_args['SCMinter'][2] = contract_oracle.address
-    deploy_args['SCMinter'][3] = contract_glp.address
     
     return SCMinter.deploy(*deploy_args['SCMinter'], 
                             {"from": accounts[0]})
@@ -184,160 +159,16 @@ def test_constructor(contract_glp):
     
     
     
-def test_initialize(contract_glp, contract_glp2, contract_glp3, contract_gex,
-                    contract_pricefeed, contract_pricefeed2):
-    
-    expected_mint = round(initialize_args['GenLiqPool'][0] * 100000000 * deploy_args['GenLiqPool'][2]) * 1e12
-    
-    with reverts():
-        contract_glp.mintSwapNative(0, {"from": accounts[0], "value": 1e18})
-        
-    with reverts():
-        contract_glp.redeemSwap(1, 0, {"from": accounts[0]})
-        
-    with reverts():
-        initialize_args['GenLiqPool'][1] = ZERO_ADDRESS
-        initialize_args['GenLiqPool'][2] = ZERO_ADDRESS
-        contract_glp.initialize(*initialize_args['GenLiqPool'], 
-                                {"from": accounts[0]})
-        
-    initialize_args['GenLiqPool'][2] = contract_pricefeed.address
-    contract_glp.initialize(*initialize_args['GenLiqPool'], 
-                            {"from": accounts[0]})
-    
-    assert contract_glp.mintedGEX() == expected_mint
-    assert contract_glp.balanceGEX() == expected_mint
-    assert contract_glp.meanVolume() == expected_mint
-    assert contract_glp.isInitialized() == True
-    
-    with reverts():
-        contract_glp.initialize(*initialize_args['GenLiqPool'], 
-                                {"from": accounts[0]})
-    
-    
-    initialize_args['GenLiqPool'][2] = contract_pricefeed2.address
-    contract_glp2.initialize(*initialize_args['GenLiqPool'], 
-                             {"from": accounts[0]})
-    
-    contract_glp.unpauseMint({"from": accounts[0]})
-    contract_glp2.unpauseMint({"from": accounts[0]})
-    
-    assert contract_glp.isMintPaused() == False
-    assert contract_glp2.isMintPaused() == False
-    
-    
-    
-    contract_gex.requestAddAddress(contract_glp3.address, {"from": accounts[0]})
-    chain.sleep(3600*24*8)
-    chain.mine()
-    contract_gex.addMinter(contract_glp3.address, {"from": accounts[0]})
-    
-    initialize_args['GenLiqPool'][0] = 0
-    initialize_args['GenLiqPool'][2] = contract_pricefeed.address
-    contract_glp3.initialize(*initialize_args['GenLiqPool'], 
-                              {"from": accounts[0]})
-    
-    
-    
-def test_pricefeed(contract_pricefeed):
-    
-    data = contract_pricefeed.latestRoundData()
-    
-    assert data[1] == deploy_args['V3Aggregator'][1]
-    
-    
-def test_pricefeed2(contract_pricefeed2):
-    
-    data = contract_pricefeed2.latestRoundData()
-    
-    assert data[1] == deploy_args['V3Aggregator2'][1]
-    
+from test_glp import test_initialize, test_pricefeed, test_pricefeed2        
+from test_glp import test_setSCMinter, test_setOracle, test_setLender, test_setCollector, test_setArbitrageur
+from test_glp import test_setMintFee, test_setRedeemFee, test_setMintRates
+from test_glp import test_requestAddAddress, test_requestRemoveAddress, test_requestAddressChange
+from test_glp import test_applyPriceFeedChange, test_applyPriceFeedChange, test_applySCMinterChange
+from test_glp import test_applyOracleChange, test_applyLenderChange, test_cancelChangeRequests
+from test_glp import test_variableFee, test_amountFeeMint, test_amountFeeRedeem
+from test_glp import test_pauseMint, test_unpauseMint, test_bailoutMinter
 
 
-def test_setSCMinter(contract_glp, contract_scminter):
-    
-    chain.snapshot()
-    
-    contract_glp.setSCMinter(contract_scminter.address, {"from": accounts[0]})
-    
-    # with reverts('dev: already set'):
-    with reverts():
-        contract_glp.setSCMinter(accounts[2], {"from": accounts[0]})
-        
-    assert contract_glp.scMinter() == contract_scminter.address
-    
-    chain.revert()
-        
-        
-def test_setOracle(contract_glp, contract_oracle):
-    
-    chain.snapshot()
-    
-    contract_glp.setOracle(contract_oracle.address, {"from": accounts[0]})
-    
-    # with reverts('dev: already set'):
-    with reverts():
-        contract_glp.setOracle(contract_oracle.address, {"from": accounts[0]})
-        
-    chain.revert()
-                
-        
-def test_setLender(contract_glp):
-    
-    chain.snapshot()
-    
-    contract_glp.setLender(accounts[5], {"from": accounts[0]})
-    
-    # with reverts('dev: already set'):
-    with reverts():
-        contract_glp.setLender(accounts[5], {"from": accounts[0]})
-        
-    assert contract_glp.treasuryLender() == accounts[5]
-    
-    chain.revert()
-        
-        
-def test_setCollector(contract_glp):
-    
-    chain.snapshot()
-    
-    contract_glp.setCollector(accounts[7], {"from": accounts[0]})
-    contract_glp.setCollector(accounts[6], {"from": accounts[0]})
-    
-    chain.revert()
-    
-    
-def test_setArbitrageur(contract_glp):
-    
-    chain.snapshot()
-    
-    contract_glp.setArbitrageur(accounts[8], {"from": accounts[0]})
-    contract_glp.setArbitrageur(accounts[7], {"from": accounts[0]})
-    
-    assert contract_glp.arbitrageur() == accounts[7]
-    
-    chain.revert()
-    
-
-
-def test_setMintFee(contract_glp):
-    
-    contract_glp.setMintFee(0, {"from": accounts[0]})
-    contract_glp.setMintFee(5000, {"from": accounts[0]})
-    contract_glp.setMintFee(1000, {"from": accounts[0]})
-    
-    with reverts():
-        contract_glp.setMintFee(5001, {"from": accounts[0]})
-        
-        
-def test_setRedeemFee(contract_glp):
-    
-    contract_glp.setRedeemFee(0, {"from": accounts[0]})
-    contract_glp.setRedeemFee(5000, {"from": accounts[0]})
-    contract_glp.setRedeemFee(2000, {"from": accounts[0]})
-    
-    with reverts():
-        contract_glp.setRedeemFee(5001, {"from": accounts[0]})
 
 
 
@@ -352,6 +183,9 @@ def test_setPoolWeight(contract_glp, contract_glp2, contract_token2, contract_or
     
     prev_weight = contract_glp.poolWeight()
     
+    assert prev_weight == deploy_args['GenLiqPoolNat'][1]
+    
+    
     with reverts('dev: invalid weight value'):
         contract_glp.setPoolWeight(0, {"from": accounts[0]})
         
@@ -365,411 +199,41 @@ def test_setPoolWeight(contract_glp, contract_glp2, contract_token2, contract_or
         contract_glp.setPoolWeight(prev_weight - 51, {"from": accounts[0]})
         
     
-    contract_glp.mintSwapNative(0, {"from": arb_addr, "value": 1*1e18})
-    oracle_pool_weight1 = contract_oracle.getPoolCollatWeight(contract_glp.address)
+    contract_glp.mintSwapNative(0, {"from": arb_addr, "value": 1e18})
+    oracle_pool_weight1 = contract_oracle.getPoolCollatWeight(contract_glp.address) / 1e15
     
     assert contract_glp.balanceCollateral() > 0
     assert oracle_pool_weight1 != 0
     
     
     contract_token2.approve(contract_glp2.address, 2**256-1, {"from": arb_addr2})
-    contract_glp2.mintSwap(0.1*1e18, 0, {"from": arb_addr2})
-    oracle_pool_weight2 = contract_oracle.getPoolCollatWeight(contract_glp2.address)
+    contract_glp2.mintSwap(1e18, 0, {"from": arb_addr2})
+    oracle_pool_weight2 = contract_oracle.getPoolCollatWeight(contract_glp2.address) / 1e15
     
     assert contract_glp2.balanceCollateral() > 0
     assert oracle_pool_weight2 != 0
     
     new_weight = prev_weight - 50
-    contract_glp.setPoolWeight(new_weight, {"from": accounts[0]})
-    
     expected_poolsupply = round(100000000 * new_weight / 1000) * int(1e18)
     
+    contract_glp.setPoolWeight(new_weight, {"from": accounts[0]})
+    
     assert contract_glp.poolSupply() == expected_poolsupply
+    assert contract_glp.poolWeight() == deploy_args['GenLiqPoolNat'][1] - 50
     
+    actualWeight = (contract_glp.getCollateralValue() *1e3) / contract_oracle.getTotalCollatValue();
+    print(actualWeight, contract_glp.poolWeight())
+    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
     
-    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
-    contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
+    assert contract_glp.poolWeight() == deploy_args['GenLiqPoolNat'][1] - 100
+        
     with reverts('dev: oracle weight change too big'):
         contract_glp.setPoolWeight(contract_glp.poolWeight() - 50, {"from": accounts[0]})
     
     chain.revert()
 
 
-def test_setMintRates(contract_glp):
-    
-    chain.snapshot()
-    
-    
-    with reverts('dev: mintRate too high'):
-        contract_glp.setMintRates(1.01*1e6, 1e6, {"from": accounts[0]})
-        
-    with reverts('dev: mintRate too low'):
-        contract_glp.setMintRates(0.94*1e6, 1e6, {"from": accounts[0]})
-    
-    with reverts('dev: burnRate too low'):
-        contract_glp.setMintRates(1e6, 0.99*1e6, {"from": accounts[0]})
-        
-    # with reverts('dev: burnRate too high'):
-    with reverts():
-        contract_glp.setMintRates(1e6, 1.06*1e6, {"from": accounts[0]})
-        
-    
-    contract_glp.setMintRates(int(0.95*1e6), int(1.05*1e6), {"from": accounts[0]})
-    
-    assert contract_glp.minMintRate() == int(0.95*1e6)
-    assert contract_glp.minBurnRate() == int(1.05*1e6)
-    
-    chain.revert()
-    
-    
-
-
-def test_requestAddAddress(contract_glp, contract_scminter):
-    
-    chain.snapshot()
-    
-    lender_address = with_setLender(contract_glp)
-    
-    
-    with reverts(): 
-        contract_glp.requestAddAddress(ZERO_ADDRESS, {"from": accounts[0]})
-        
-    with reverts():
-        contract_glp.requestAddAddress(accounts[2], {"from": accounts[1]})
-    
-    contract_glp.requestAddAddress(accounts[2], {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(ZERO_ADDRESS)[0] == True
-    assert abs(contract_glp.changeRequests(ZERO_ADDRESS)[1] - chain.time()) <= 1
-    assert contract_glp.changeRequests(ZERO_ADDRESS)[2] == accounts[2]
-    
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyPriceFeedChange({"from": accounts[0]})
-        
-    
-    contract_glp.requestAddAddress(contract_scminter.address, {"from": accounts[0]})
-    with reverts(): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-        
-    
-    contract_glp.requestAddAddress(lender_address, {"from": accounts[0]})
-    with reverts(): 
-        contract_glp.applyLenderChange({"from": accounts[0]})
-    
-    chain.revert()
-
-
-def test_requestRemoveAddress(contract_glp, contract_scminter):
-    
-    chain.snapshot()
-    
-    with_setSCMinter(contract_glp, contract_scminter)
-    lender_address = with_setLender(contract_glp)
-    
-    
-    with reverts(): 
-        contract_glp.requestRemoveAddress(ZERO_ADDRESS, {"from": accounts[0]})
-        
-    with reverts():
-        contract_glp.requestRemoveAddress(accounts[2], {"from": accounts[1]})
-    
-    
-    contract_glp.requestRemoveAddress(accounts[2], {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(accounts[2])[0] == True
-    assert abs(contract_glp.changeRequests(accounts[2])[1] - chain.time()) <= 1
-    assert contract_glp.changeRequests(accounts[2])[2] == ZERO_ADDRESS
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyPriceFeedChange({"from": accounts[0]})
-        
-    
-    contract_glp.requestRemoveAddress(contract_scminter.address, {"from": accounts[0]})
-    
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-    
-    chain.sleep(3600*24*31)
-    chain.mine()
-    with reverts('dev: Address zero'): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-        
-    
-    contract_glp.requestRemoveAddress(lender_address, {"from": accounts[0]})
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applyLenderChange({"from": accounts[0]})
-    
-    chain.revert()
-        
-
-def test_requestAddressChange(contract_glp):
-    
-    chain.snapshot()
-    
-    old_contract = with_setArbitrageur(contract_glp)
-    new_contract = accounts[3]
-    
-    assert contract_glp.changeRequests(old_contract)[0] == False
-    
-    with reverts(): 
-        contract_glp.requestAddressChange(old_contract, ZERO_ADDRESS, 
-                                          {"from": accounts[0]})
-        
-    with reverts():
-        contract_glp.requestAddressChange(old_contract, new_contract, 
-                                          {"from": accounts[1]})
-    
-    
-    contract_glp.requestAddressChange(old_contract, new_contract, 
-                                      {"from": accounts[0]})
-    
-    assert abs(contract_glp.changeRequests(old_contract)[1] - chain.time()) <= 1
-    assert contract_glp.changeRequests(old_contract)[0] == True
-    assert contract_glp.changeRequests(old_contract)[2] == new_contract
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyPriceFeedChange({"from": accounts[0]})
-        
-    with reverts(): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-        
-    with reverts('dev: Not requested'): 
-        contract_glp.applyOracleChange({"from": accounts[0]})
-        
-    with reverts('dev: Not requested'): 
-        contract_glp.applyLenderChange({"from": accounts[0]})
-    
-    chain.revert()
-    
-
-
-def test_applyPriceFeedChange(contract_glp, contract_pricefeed):
-    
-    chain.snapshot()
-    
-    old_contract = contract_pricefeed.address
-    new_contract = accounts[4]
-    
-    
-    contract_glp.requestAddressChange(old_contract, new_contract, 
-                                      {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == True
-    assert contract_glp.changeRequests(old_contract)[2] == new_contract
-    
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applyPriceFeedChange({"from": accounts[0]})
-    
-    chain.sleep(3600*24*8)
-    chain.mine()
-    
-    contract_glp.applyPriceFeedChange({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == False
-    assert contract_glp.changeRequests(new_contract)[0] == False
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyPriceFeedChange({"from": accounts[0]})
-        
-    chain.revert()
-    
-    
-    
-def test_applySCMinterChange(contract_glp, contract_scminter):
-    
-    chain.snapshot()
-    
-    old_contract = with_setSCMinter(contract_glp, contract_scminter)
-    new_contract = accounts[4]
-    
-    
-    contract_glp.requestAddressChange(old_contract, new_contract, 
-                                      {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == True
-    assert contract_glp.changeRequests(old_contract)[2] == new_contract
-    
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-    
-    chain.sleep(3600*24*31)
-    chain.mine()
-    
-    contract_glp.applySCMinterChange({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == False
-    assert contract_glp.changeRequests(new_contract)[0] == False
-    
-    with reverts(): 
-        contract_glp.applySCMinterChange({"from": accounts[0]})
-        
-    chain.revert()
-
-
-def test_applyOracleChange(contract_glp, contract_oracle):
-    
-    chain.snapshot()
-    
-    old_contract = with_setOracle(contract_glp, contract_oracle)
-    new_contract = accounts[4]
-    
-    
-    contract_glp.requestAddressChange(old_contract, new_contract, 
-                                      {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == True
-    assert contract_glp.changeRequests(old_contract)[2] == new_contract
-    
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applyOracleChange({"from": accounts[0]})
-    
-    chain.sleep(3600*24*31)
-    chain.mine()
-    
-    contract_glp.applyOracleChange({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == False
-    assert contract_glp.changeRequests(new_contract)[0] == False
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyOracleChange({"from": accounts[0]})
-        
-    chain.revert()
-    
-    
-def test_applyLenderChange(contract_glp):
-    
-    chain.snapshot()
-    
-    old_contract = with_setLender(contract_glp)
-    new_contract = accounts[4]
-    
-    
-    contract_glp.requestAddressChange(old_contract, new_contract, 
-                                      {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == True
-    assert contract_glp.changeRequests(old_contract)[2] == new_contract
-    
-    with reverts('dev: Time elapsed'): 
-        contract_glp.applyLenderChange({"from": accounts[0]})
-    
-    chain.sleep(3600*24*31)
-    chain.mine()
-    
-    contract_glp.applyLenderChange({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(old_contract)[0] == False
-    assert contract_glp.changeRequests(new_contract)[0] == False
-    
-    with reverts('dev: Not requested'): 
-        contract_glp.applyLenderChange({"from": accounts[0]})
-        
-    chain.revert()
-    
-    
-    
-def test_cancelChangeRequests(contract_glp, contract_pricefeed, contract_oracle, contract_scminter):
-    
-    chain.snapshot()
-    
-    pricefeed_addr = contract_pricefeed.address
-    oracle_addr = with_setOracle(contract_glp, contract_oracle)
-    scminter_addr = with_setSCMinter(contract_glp, contract_scminter)
-    lender_addr = with_setLender(contract_glp)
-    
-    
-    with reverts():
-        contract_glp.cancelChangeRequests({"from": accounts[1]})
-        
-    
-    contract_glp.requestAddAddress(accounts[1], {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(ZERO_ADDRESS)[0] == True
-    
-    contract_glp.cancelChangeRequests({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(ZERO_ADDRESS)[0] == False
-    
-    
-    contract_glp.requestRemoveAddress(pricefeed_addr, {"from": accounts[0]})
-    contract_glp.requestRemoveAddress(oracle_addr, {"from": accounts[0]})
-    contract_glp.requestRemoveAddress(scminter_addr, {"from": accounts[0]})
-    contract_glp.requestRemoveAddress(lender_addr, {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(pricefeed_addr)[0] == True
-    assert contract_glp.changeRequests(oracle_addr)[0] == True
-    assert contract_glp.changeRequests(scminter_addr)[0] == True
-    assert contract_glp.changeRequests(lender_addr)[0] == True
-    
-    contract_glp.cancelChangeRequests({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(pricefeed_addr)[0] == False
-    assert contract_glp.changeRequests(oracle_addr)[0] == False
-    assert contract_glp.changeRequests(scminter_addr)[0] == False
-    assert contract_glp.changeRequests(lender_addr)[0] == False
-    
-    
-    contract_glp.requestAddressChange(pricefeed_addr, accounts[2], {"from": accounts[0]})
-    contract_glp.requestAddressChange(oracle_addr, accounts[2], {"from": accounts[0]})
-    contract_glp.requestAddressChange(scminter_addr, accounts[2], {"from": accounts[0]})
-    contract_glp.requestAddressChange(lender_addr, accounts[2], {"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(pricefeed_addr)[0] == True
-    assert contract_glp.changeRequests(oracle_addr)[0] == True
-    assert contract_glp.changeRequests(scminter_addr)[0] == True
-    assert contract_glp.changeRequests(lender_addr)[0] == True
-    
-    contract_glp.cancelChangeRequests({"from": accounts[0]})
-    
-    assert contract_glp.changeRequests(pricefeed_addr)[0] == False
-    assert contract_glp.changeRequests(oracle_addr)[0] == False
-    assert contract_glp.changeRequests(scminter_addr)[0] == False
-    assert contract_glp.changeRequests(lender_addr)[0] == False
-    
-    chain.revert()
-
-
-
-
-@given(amount = strategy('uint64', min_value=1, max_value=1000000000))
-def test_variableFee(contract_glp, amount):
-    
-    baseFee = 1000
-    
-    fee = contract_glp.variableFee(amount*int(1e18), baseFee)
-    
-    assert fee - expected_fee(amount, baseFee) < 2
-    
-    
-@given(amount = strategy('uint64', min_value=1, max_value=1000000000))
-def test_amountFeeMint(contract_glp, amount):
-    
-    baseFee = 1000
-    fee = expected_fee(amount, baseFee)
-    expected_amount = amount*int(1e12) * fee
-    
-    fee_amount = contract_glp.amountFeeMint(amount*int(1e18))
-    
-    assert fee_amount - expected_amount < 10
-    
-    
-@given(amount = strategy('uint64', min_value=1, max_value=1000000000))
-def test_amountFeeRedeem(contract_glp, amount):
-    
-    baseFee = 2000
-    fee = expected_fee(amount, baseFee)
-    expected_amount = amount*int(1e12) * fee
-    
-    fee_amount = contract_glp.amountFeeRedeem(amount*int(1e18))
-    
-    assert fee_amount - expected_amount < 10
-    
-    
-
-
-    
+  
 # Math of this function is fully tested on python simulations
 @given(amount = strategy('uint128'))
 def test_amountOutGEX(contract_glp, contract_oracle, amount):
@@ -777,7 +241,16 @@ def test_amountOutGEX(contract_glp, contract_oracle, amount):
     chain.snapshot()
     
     with_tradeInit_native(contract_glp, contract_oracle)
-
+    
+    
+    # mintratio = contract_glp._mintRatio()
+    # burnratio = contract_glp._burnRatio()
+    
+    # assert mintratio >= int(1e6)
+    # assert mintratio <= int(2*1e6)
+    # assert burnratio >= int(1e6)
+    # assert burnratio <= int(2*1e6)
+    
     assert contract_glp.amountMint(amount) >= 0
     assert contract_glp.amountBurn(amount) >= 0
     
@@ -793,6 +266,15 @@ def test_amountOutCollateral(contract_glp, contract_oracle, amount):
     chain.snapshot()
     
     with_some_prev_mints_native(contract_glp, contract_oracle)
+    
+    
+    # mintratio = contract_glp._mintRatio()
+    # burnratio = contract_glp._burnRatio()
+    
+    # assert mintratio >= int(1e6)
+    # assert mintratio <= int(2*1e6)
+    # assert burnratio >= int(1e6)
+    # assert burnratio <= int(2*1e6)
     
     assert contract_glp.amountMint(amount) >= 0
     assert contract_glp.amountBurn(amount) >= 0
@@ -814,6 +296,7 @@ def test_mintSwap_redeemSwap(contract_glp, contract_gex, contract_oracle):
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(10):
+        print(i)
         chain.sleep(3600*3)
         chain.mine()
         contract_glp.mintSwapNative(0, {"from": accounts[0], 'value': 5*1e18})
@@ -823,6 +306,10 @@ def test_mintSwap_redeemSwap(contract_glp, contract_gex, contract_oracle):
     amount = int(balanceGEX / 51)
     
     for i in range(20):
+        print(i)
+        print(contract_gex.balanceOf(accounts[0])/1e18)
+        print(amount/1e18)
+        print(contract_glp.amountOutCollateral(amount)/1e18)
         chain.sleep(600)
         chain.mine()
         contract_glp.redeemSwap(amount, 0, {"from": accounts[0]})
@@ -840,17 +327,20 @@ def test_mintRedeem_alt(contract_glp, contract_gex, contract_oracle):
     chain.snapshot()
     
     with_tradeInit_native(contract_glp, contract_oracle)
-
+   
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(20):
+        print(i)
+        
         contract_glp.mintSwapNative(0, {"from": accounts[0], "value": 3*1e18})
         chain.sleep(3600)
         chain.mine()
-        
+
         amount = contract_gex.balanceOf(accounts[0])
         contract_glp.redeemSwap(amount, 0, {"from": accounts[0]})
-
+        
+    
     assert contract_glp.balanceGEX() < contract_gex.balanceOf(contract_glp.address)
     assert contract_glp.balanceCollateral() == contract_glp.balance()
     
@@ -864,9 +354,11 @@ def test_mintRedeem_rand(contract_glp, contract_gex, contract_oracle):
     
     with_some_prev_mints_native(contract_glp, contract_oracle)
     
+  
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(100):
+        print(i)
         op = np.random.choice([0,1])
         
         if op > 0:
@@ -876,11 +368,12 @@ def test_mintRedeem_rand(contract_glp, contract_gex, contract_oracle):
         else:
             balance = int(contract_gex.balanceOf(accounts[0]) / 1e18)
             amount = np.random.randint(0, balance) * int(1e18)
+
             contract_glp.redeemSwap(amount, 0, {"from": accounts[0]})
         
         chain.sleep(np.random.randint(1, 10000))
         chain.mine()
-        
+ 
     chain.revert()
             
             
@@ -892,12 +385,13 @@ def test_multiPool_rand(contract_glp, contract_glp2, contract_gex,
     
     with_some_prev_mints_native(contract_glp, contract_oracle)
     with_some_prev_mints(contract_glp2, contract_token2, contract_oracle)
-
+ 
     contract_gex.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     contract_gex.approve(contract_glp2.address, 2**256-1, {"from": accounts[0]})
     contract_token2.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
     
     for i in range(500):
+        print(i)
         op = np.random.choice([0,1])
         pool = np.random.choice([0,1])
         
@@ -924,38 +418,14 @@ def test_multiPool_rand(contract_glp, contract_glp2, contract_gex,
         
         chain.sleep(3600*6)
         chain.mine()
+        
             
     chain.revert()
 
 
-
-def test_pauseMint(contract_glp):
-    
-    assert contract_glp.isMintPaused() == False
-    
-    with reverts():
-        contract_glp.pauseMint({"from": accounts[1]})
-    
-    contract_glp.pauseMint({"from": accounts[0]})
-    
-    assert contract_glp.isMintPaused() == True
     
     
-def test_unpauseMint(contract_glp):
-    
-    assert contract_glp.isMintPaused() == True
-    assert contract_glp.isMigrationRequested() == False
-    assert contract_glp.isRemoveRequested() == False
-    
-    with reverts():
-        contract_glp.pauseMint({"from": accounts[1]})
-    
-    contract_glp.unpauseMint({"from": accounts[0]})
-    
-    assert contract_glp.isMintPaused() == False
-    
-    
-def test_matchBalances(contract_glp, contract_gex, contract_token):
+def test_matchBalancesNative(contract_glp, contract_gex):
     
     with reverts():
         contract_glp.matchBalances({"from": accounts[1]})
@@ -968,58 +438,7 @@ def test_matchBalances(contract_glp, contract_gex, contract_token):
 
 
 
-def test_bailoutMinter(contract_glp, contract_scminter, contract_oracle, contract_gex):
-    
-    chain.snapshot()
-    
-    initial_gex_balance = contract_glp.balanceGEX()
-    
-    # with reverts('dev: scminter not set'):
-    with reverts():
-        contract_glp.bailoutMinter({"from": accounts[0]})
-        
-    with_setSCMinter(contract_glp, contract_scminter)
-    
-    with reverts('dev: oracle not set'):
-        contract_glp.bailoutMinter({"from": accounts[0]})
-        
-    with_setOracle(contract_glp, contract_oracle)
-    contract_oracle.setSCMinter(contract_scminter.address, {"from": accounts[0]})
-    
-    with reverts('dev: scminter too new'):
-        contract_glp.bailoutMinter({"from": accounts[0]})
-    
-    chain.sleep(3600*24*8)
-    chain.mine()
-    
-    with reverts('dev: oracle too new'):
-        contract_glp.bailoutMinter({"from": accounts[0]})
-    
-    chain.sleep(3600*24*24)
-    chain.mine()
-    
-    with reverts('dev: invalid caller address'):
-        contract_glp.bailoutMinter({"from": accounts[1]})
-    
-    
-    tx = contract_glp.bailoutMinter({"from": accounts[0]})
-    
-    assert tx.return_value <= initial_gex_balance/100
-    assert tx.return_value <= 5*initial_gex_balance/100
-    assert contract_gex.allowance(contract_glp.address, contract_scminter.address) > 0
-    
-    
-    contract_gex.transferFrom(contract_glp.address, contract_scminter.address, 
-                              tx.return_value, {"from": contract_scminter.address})
-    
-    assert contract_gex.balanceOf(contract_scminter.address) >= tx.return_value
-    assert initial_gex_balance - tx.return_value == contract_glp.balanceGEX()
-    
-    chain.revert()
-    
-    
-
-def test_lendCollateral(contract_glp, contract_scminter, 
+def test_lendCollateralNative(contract_glp, contract_scminter, 
                         contract_oracle, contract_gex, contract_usdi):
     
     chain.snapshot()
@@ -1127,7 +546,6 @@ def test_repayCollateralNative(contract_glp, contract_scminter,
     assert contract_glp.balanceLent() == 0
         
     chain.revert()
-
 
 
 def test_collectFees(contract_glp, contract_oracle, contract_gex):
@@ -1281,9 +699,12 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     with_some_prev_mints_native(contract_glp, contract_oracle)
     with_some_prev_mints(contract_glp2, contract_token2, contract_oracle)
-    with_reduce_pool_weight(49, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(49, contract_glp, contract_glp2, contract_oracle, contract_gex)
     
     with_setOracle(contract_glp3, contract_oracle)
+    contract_oracle.requestAddAddress(contract_glp3.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_oracle.addPool(contract_glp3.address, {"from": accounts[0]})
     chain.sleep(3600*24*31)
     chain.mine()
@@ -1291,6 +712,9 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     assert contract_glp.poolWeight() < 50
     
     
+    contract_oracle.requestAddressChange(contract_glp.address, contract_glp3.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_glp.requestMigration(new_addr, {"from": accounts[0]})
     
     with reverts("Mint paused"):
@@ -1307,7 +731,7 @@ def test_Migration(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     with reverts():
         contract_glp.migratePool({"from": accounts[0]})
         
-    with_reduce_pool_weight(19, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(19, contract_glp, contract_glp2, contract_oracle, contract_gex)
     chain.sleep(3600*24*31)
     chain.mine()
     
@@ -1357,13 +781,16 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     
     with_some_prev_mints_native(contract_glp, contract_oracle)
     with_some_prev_mints(contract_glp2, contract_token2, contract_oracle)
-    with_reduce_pool_weight(45, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(45, contract_glp, contract_glp2, contract_oracle, contract_gex)
     
     assert contract_glp.poolWeight() < 50
     
     chain.sleep(3600*24*31)
     chain.mine()
     
+    contract_oracle.requestRemoveAddress(contract_glp.address, {"from": accounts[0]})
+    chain.sleep(3600*24*8)
+    chain.mine()
     contract_glp.requestRemove({"from": accounts[0]})
     
     with reverts("Mint paused"):
@@ -1379,7 +806,7 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     with reverts():
         contract_glp.removePool({"from": accounts[0]})
         
-    with_reduce_pool_weight(9, contract_glp, contract_glp2, contract_oracle)
+    with_reduce_pool_weight(9, contract_glp, contract_glp2, contract_oracle, contract_gex)
     chain.sleep(3600*24*31)
     chain.mine()
     
@@ -1411,128 +838,14 @@ def test_removePool(contract_glp, contract_glp2, contract_glp3, contract_oracle,
     chain.revert()
     
     
-def test_pass(contract_glp): pass
 
 
-
-"""
-PRIVATE FUNCTIONS TESTS
-"""
-
-# def test_pre_updateOracle(contract_glp, contract_oracle):
-    
-#     with_many_prev_mints_native(contract_glp, contract_oracle)
-
-# @given(amount = strategy('uint128'))
-# def test_updateOracle(contract_glp, amount):
-    
-#     contract_glp._updateOracle(amount)
-
-
-
-# def test_pre_initOutGEXAmount(contract_glp):
-    
-#     contract_glp.setArbitrageur(accounts[7], {"from": accounts[0]})
-
-# # Math of this function is fully tested on python simulations
-# @given(amount = strategy('uint128'))
-# def test_initOutGEXAmount(contract_glp, amount):
-    
-#     contract_glp._initOutGEXAmount(amount, {"from": accounts[7]})
-    
-    
 
 
 """
 CONTEXT FUNCTIONS
 """
 # chain revert should be used if this approach is used for test isolation
-
-def with_setSCMinter(contract_glp, contract_scminter):
-    
-    if contract_glp.scMinter() != contract_scminter.address:
-        contract_glp.setSCMinter(contract_scminter.address, {"from": accounts[0]})
-    
-    return contract_scminter.address
-    
-
-def with_setOracle(contract_glp, contract_oracle):
-    
-    contract_glp.setOracle(contract_oracle.address, {"from": accounts[0]})
-    
-    return contract_oracle.address
-    
-
-def with_setArbitrageur(contract_glp):
-    
-    contract_glp.setArbitrageur(accounts[7], {"from": accounts[0]})
-    
-    return accounts[7]
-
-
-def with_setLender(contract_glp):
-    
-    if contract_glp.treasuryLender() != accounts[5]:
-        contract_glp.setLender(accounts[5], {"from": accounts[0]})
-    
-    return accounts[5]
-
-
-def with_setCollector(contract_glp):
-    
-    contract_glp.setCollector(accounts[6], {"from": accounts[0]})
-    
-    return accounts[6]
-
-
-def with_tradeInit(contract_glp, contract_token, contract_oracle):
-    
-    with_setOracle(contract_glp, contract_oracle)
-    arb_address = with_setArbitrageur(contract_glp)
-    contract_token.approve(contract_glp.address, 2**256-1, {"from": arb_address})
-    
-    amount = 1000 * int(1e36) / contract_glp.collateralPrice()
-    contract_glp.mintSwap(amount, 0, {"from": arb_address})
-    
-    chain.sleep(3600)
-    chain.mine()
-
-
-def with_some_prev_mints(contract_glp, contract_token, contract_oracle):
-    
-    with_tradeInit(contract_glp, contract_token, contract_oracle)
-    
-    contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
-    amount = 1000 * int(1e36) / contract_glp.collateralPrice()
-    
-    for i in range(5):
-        print(i)
-        chain.sleep(3600)
-        chain.mine()
-        contract_glp.mintSwap(amount, 0, {"from": accounts[0]})
-        
-    chain.sleep(3600)
-    chain.mine()
-    
-    
-    
-def with_many_prev_mints(contract_glp, contract_token, contract_oracle):
-    
-    with_tradeInit(contract_glp, contract_token, contract_oracle)
-    
-    contract_token.approve(contract_glp.address, 2**256-1, {"from": accounts[0]})
-    amount = 1000 * int(1e36) / contract_glp.collateralPrice()
-    
-    for i in range(20):
-        print(i)
-        chain.sleep(i*3600)
-        chain.mine()
-        contract_glp.mintSwap(i*amount, 0, {"from": accounts[0]})
-        
-    chain.sleep(3600)
-    chain.mine()
-    
-        
 
 def with_some_usdi_minted_native(contract_scminter, contract_glp, 
                           contract_oracle, contract_gex, contract_usdi):
@@ -1542,31 +855,6 @@ def with_some_usdi_minted_native(contract_scminter, contract_glp,
     contract_gex.approve(contract_scminter.address, 2**256-1, {"from": accounts[0]})
     amount = contract_glp.balanceGEX() / 50
     contract_scminter.mintStablecoin(contract_usdi.address, amount, {"from": accounts[0]})
-
-
-
-def with_reduce_pool_weight(target_weight, contract_glp, contract_glp2, contract_oracle): 
-    
-    actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
-    
-    while actual_weight > target_weight:
-    
-        print(f'Actual weight pool 1: {actual_weight}')
-        print(f'Weight pool 1: {contract_glp.poolWeight()}')
-        local_target_weight = max(contract_glp.poolWeight() - 50, target_weight)
-        contract_glp.setPoolWeight(local_target_weight, {"from": accounts[0]})
-        contract_glp2.setPoolWeight(contract_glp2.poolWeight() + 50, {"from": accounts[0]})
-        
-        i = 0
-        while actual_weight > local_target_weight:
-            i+=1
-            print(i)
-            chain.sleep(2*i*3600)
-            chain.mine()
-            tx = contract_glp2.mintSwap(int(1e17), 0, {"from": accounts[0]})
-            contract_glp.redeemSwap(tx.return_value, 0, {"from": accounts[0]})
-            actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
-            
 
 
 
@@ -1614,60 +902,6 @@ def with_many_prev_mints_native(contract_glp, contract_oracle):
     chain.sleep(3600)
     chain.mine()
     
-    
-
-def with_reduce_pool_native_weight(target_weight, contract_glp, contract_glp2, contract_oracle): 
-    
-    actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
-    
-    while actual_weight > target_weight:
-    
-        print(f'Actual weight pool 1: {actual_weight}')
-        print(f'Weight pool 1: {contract_glp.poolWeight()}')
-        local_target_weight = max(contract_glp.poolWeight() - 50, target_weight)
-        contract_glp.setPoolWeight(local_target_weight, {"from": accounts[0]})
-        contract_glp2.setPoolWeight(contract_glp2.poolWeight() + 50, {"from": accounts[0]})
-        
-        i = 0
-        while actual_weight > local_target_weight:
-            i+=1
-            print(i)
-            chain.sleep(2*i*3600)
-            chain.mine()
-            tx = contract_glp2.mintSwapNative(0, {"from": accounts[0], "value": int(1e17)})
-            contract_glp.redeemSwap(tx.return_value, 0, {"from": accounts[0]})
-            actual_weight = contract_oracle.getPoolCollatWeight(contract_glp.address)
-        
-    
-
-
-
-
-
-"""
-AUXILIARY FUNCTIONS
-"""
-
-def expected_fee(amount, baseMintFee):
-    
-    usdAmount = amount * 0.01
-    
-    if usdAmount < 1000:
-        fee = baseMintFee
-    
-    elif usdAmount < 10000:
-        fee = baseMintFee + int(500 * (usdAmount - 1000) / 9000)
-    
-    elif usdAmount < 100000:
-        fee = baseMintFee + 500 + int(500 * (usdAmount - 10000) / 90000)
-    
-    elif usdAmount < 1000000:
-        fee = baseMintFee + 1000 + int(1000 * (usdAmount - 100000) / 900000)
-    
-    else:
-        fee = baseMintFee + 2000
-        
-    return fee
 
 
 
