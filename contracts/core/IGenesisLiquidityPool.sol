@@ -91,5 +91,9 @@ interface IGenesisLiquidityPool is ICollectible {
 
     function amountOutCollateral(uint256 inGEXAmount) external view returns(uint256);
 
+    function amountMint(uint256 outGEXAmount) external view returns(uint256);
+
+    function amountBurn(uint256 inGEXAmount) external view returns(uint256);
+
     function variableFee(uint256 amountGEX, uint256 baseFee) external view returns(uint256);
 }
