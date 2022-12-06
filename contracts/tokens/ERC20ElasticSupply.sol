@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./IERC20ElasticSupply.sol";
+
 import "../utils/TimeLocks.sol";
 
 
@@ -16,7 +16,7 @@ import "../utils/TimeLocks.sol";
 * minted each day is limited for security. This limit varies depending on 
 * the existing supply.
 */
-contract ERC20ElasticSupply is IERC20ElasticSupply, ERC20, Ownable, TimeLocks {
+contract ERC20ElasticSupply is ERC20, Ownable, TimeLocks {
 
     uint32 public baseMintRatio;
     uint256 public thresholdLimitMint;
@@ -25,6 +25,10 @@ contract ERC20ElasticSupply is IERC20ElasticSupply, ERC20, Ownable, TimeLocks {
 
     mapping(address => bool) public minters;
 
+    event TokenMinted(address indexed from, address indexed to, uint256 amount);
+    event TokenBurned(address indexed from, address indexed to, uint256 amount);
+    event MinterAdded(address minter_address);
+    event MinterRemoved(address minter_address);
 
     modifier onlyMinter() {
        require(minters[msg.sender] == true); // dev: Only minter
@@ -87,34 +91,31 @@ contract ERC20ElasticSupply is IERC20ElasticSupply, ERC20, Ownable, TimeLocks {
         emit TokenBurned(msg.sender, from, amount);
     }
 
-
+    /// @notice Calculates the max amount of the token that can be minted
+    function maxAmountMintable() public view returns(uint256) {
+        int256 maxDailyMintable = _toInt256(_maxMintRatio()*totalSupply()) / 1e3;
+        (int256 w, int256 w2) = _weightsMean();
+        int256 maxAmount = (1e6*maxDailyMintable - w2*_meanMintRatio)/w;
+        return maxAmount > 0 ? uint256(maxAmount) : 0;
+    }
+    
     /// @dev Checks that the amount minted is not higher than the max allowed
     /// only when a total supply level has been reached.
     function _requireMaxMint(uint256 amount) internal virtual {
         if (totalSupply() > thresholdLimitMint) {
             int256 maxDailyMintable = _toInt256(_maxMintRatio()*totalSupply()) / 1e3;
-            require(_meanDailyAmount(_toInt256(amount)) <= maxDailyMintable); // dev: Max mint rate
+            require(_meanDailyAmount(_toInt256(amount)) <= maxDailyMintable, 'Max mint rate');
         }
     }
-
 
     /// @dev Calculates an exponential moving average that tracks the amount 
     /// of tokens minted in the last 24 hours.
     function _meanDailyAmount(int256 amount) internal returns(int256) {
-        int256 elapsed = _toInt256(block.timestamp - _timestampLastMint);
-        
-        if (elapsed > 0) {
-            int256 timeWeight = (24 hours * 1e6) / elapsed;
-            int256 alpha = 2*1e12 / (1e6+timeWeight);
-            int256 w = (alpha*timeWeight)/1e6;
-            int256 w2 = 1e6 - alpha;
-            _meanMintRatio = (w*amount + w2*_meanMintRatio) / 1e6;
-        } else {
-            _meanMintRatio += amount;
-        }
-        
+        (int256 w, int256 w2) = _weightsMean();
+        _meanMintRatio = (w*amount + w2*_meanMintRatio) / 1e6;
         return _meanMintRatio;
     }
+
 
     /// @dev Calculates the max percentage of supply that can be minted depending
     /// on the actual supply. Simulates a logarithmic curve. It is calibrated
@@ -148,5 +149,21 @@ contract ERC20ElasticSupply is IERC20ElasticSupply, ERC20, Ownable, TimeLocks {
     function _toInt256(uint256 value) internal pure returns(int256) {
         require(value <= uint256(type(int256).max)); // dev: Unsafe casting
         return int256(value);
-    }   
+    }
+
+
+    /// @dev Calculates the weights of the mean of the mint ratio
+    function _weightsMean() private view returns(int256 w, int256 w2) {
+        int256 elapsed = _toInt256(block.timestamp - _timestampLastMint);
+        
+        if (elapsed > 0) {
+            int256 timeWeight = (24 hours * 1e6) / elapsed;
+            int256 alpha = 2*1e12 / (1e6+timeWeight);
+            w = (alpha*timeWeight)/1e6;
+            w2 = 1e6 - alpha;
+        } else {
+            w = 1e6;
+            w2 = 1e6;
+        }
+    }
 }

@@ -1,10 +1,12 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./IGeminonOracle.sol";
-import "./IGenesisLiquidityPool.sol";
-import "./ISCMinter.sol";
+
+import "./interfaces/IGenesisLiquidityPool.sol";
+import "./interfaces/ISCMinter.sol";
+
+import "../bridges/IGeminonBridge.sol";
 import "../utils/TimeLocks.sol";
 
 
@@ -14,17 +16,19 @@ import "../utils/TimeLocks.sol";
 * @notice Protocol oracle. Performs both information
 * functions, coordination functions and safety functions.
 */
-contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
+contract GeminonOracle is Ownable, TimeLocks {
     
     bool public isAnyPoolMigrating;
     bool public isAnyPoolRemoving;
 
     address public scMinter;
+    address public bridge;
     address public treasuryLender;
     address public feesCollector;
     address[] public pools;
 
     uint64 public ageSCMinter;
+    uint64 public ageBridge;
     uint64 public ageTreasuryLender;
     uint64 public ageFeesCollector;
 
@@ -55,6 +59,7 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         }
 
         ageSCMinter = type(uint64).max;
+        ageBridge = type(uint64).max;
         ageTreasuryLender = type(uint64).max;
         ageFeesCollector = type(uint64).max;
     }
@@ -75,6 +80,18 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
 
         scMinter = scMinter_;
         ageSCMinter = uint64(block.timestamp);
+    }
+
+    /// @notice Initializes the address of the bridge
+    /// @dev this function can only be used once as it requires that the
+    /// address hasn't been already initialized. To update the address 
+    /// use the requestAddressChange() and applyMinterChange() functions.
+    function setBridge(address bridge_) external onlyOwner {
+        require(bridge == address(0));
+        require(bridge_ != address(0));
+
+        bridge = bridge_;
+        ageBridge = uint64(block.timestamp);
     }
 
     /// @notice Initializes the address of the treasury lender.
@@ -118,7 +135,7 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         _addPool(newPool);
     }
 
-    /// @notice Remove a liquitidty pool from the oracle. Timelock 7 days.
+    /// @notice Removes a liquitidty pool from the oracle. Timelock 7 days.
     function removePool(address pool) external onlyOwner {
         require(changeRequests[pool].changeRequested); // dev: Not requested
         require(changeRequests[pool].timestampRequest != 0); // dev: Timestamp request zero
@@ -218,6 +235,9 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
     // +                         MINTER MIGRATION                           +
     // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+    /// @dev Register a request to migrate the stablecoin minter. The owner must
+    /// register a changeAddress request 7 days prior to execute
+    /// the migration request.
     function requestMigrateMinter(address newMinter_) external onlyMinter {
         require(!isMigratingMinter);
         require(changeRequests[scMinter].changeRequested); // dev: Not requested
@@ -234,6 +254,8 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         newMinter = newMinter_;
     }
 
+    /// @dev Notifies the oracle that the minter migration
+    /// has been done and sets the new stablecoin minter.
     function setMinterMigrationDone() external onlyMinter {
         require(isMigratingMinter);
 
@@ -242,6 +264,7 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         isMigratingMinter = false;
     }
 
+    /// @notice Cancels a requested stablecoin minter migration
     function cancelMinterMigration() external onlyMinter {
         isMigratingMinter = false;
         newMinter = address(0);
@@ -314,12 +337,19 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         for (uint16 i=0; i<pools.length; i++)
             totalSupply += IGenesisLiquidityPool(pools[i]).mintedGEX();
         
-        if (totalSupply < 0) totalSupply = 0;
-        return uint256(totalSupply);
+        totalSupply += int256(getExternalMintedGEX());
+        return totalSupply < 0 ? 0 : uint256(totalSupply);
+    }
+
+    /// @notice Gets the amount of GEX minted in the other blockchains
+    function getExternalMintedGEX() public view returns(uint256) {
+        if(bridge == address(0))
+            return 0;
+        else
+            return IGeminonBridge(bridge).externalTotalSupply();
     }
 
     function getLockedAmountGEX() public view returns(uint256) {
-        require(isPool[msg.sender] || msg.sender == owner()); // dev: invalid caller
         require(scMinter != address(0)); // dev: scMinter not set
         return ISCMinter(scMinter).getBalanceGEX();
     }
@@ -342,7 +372,7 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
     // +                        INTERNAL FUNCTIONS                          +
     // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-    /// @notice Adds a new liquitidty pool to the oracle
+    /// @dev Adds a new liquitidty pool to the oracle
     function _addPool(address newPool) private {
         require(newPool != address(0));
         pools.push(newPool);
@@ -350,7 +380,7 @@ contract GeminonOracle is IGeminonOracle, Ownable, TimeLocks {
         poolAge[newPool] = uint64(block.timestamp);
     }
 
-    /// @notice Remove a liquitidty pool from the oracle
+    /// @dev Removes a liquitidty pool from the oracle
     function _removePool(address pool) private {
         require(isPool[pool]);
         uint16 numPools = uint16(pools.length);

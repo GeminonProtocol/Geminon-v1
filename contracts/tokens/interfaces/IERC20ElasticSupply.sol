@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 
-
 /**
 * @title IERC20ElasticSupply
 * @author Geminon Protocol
@@ -12,19 +11,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 */
 interface IERC20ElasticSupply is IERC20 {
 
-    event TokenMinted(address indexed from, address indexed to, uint256 amount);
-
-    event TokenBurned(address indexed from, address indexed to, uint256 amount);
-
-    event MinterAdded(address minter_address);
-
-    event MinterRemoved(address minter_address);
-
-    function mint(address to, uint256 amount) external;
-
-    function burn(address from, uint256 amount) external;
-
     function addMinter(address newMinter) external;
-
     function removeMinter(address minter) external;
+    function mint(address to, uint256 amount) external;
+    function burn(address from, uint256 amount) external;
+    function maxAmountMintable() external view returns(uint256);
 }

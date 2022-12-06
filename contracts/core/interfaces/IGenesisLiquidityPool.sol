@@ -8,14 +8,20 @@ interface IGenesisLiquidityPool is ICollectible {
 
     // +++++++++++++++++++  PUBLIC STATE VARIABLES  +++++++++++++++++++++++++
 
+    function initMintedAmount() external view returns(uint256);
+
     function poolWeight() external view returns(uint16);
     
+    function mintedGEX() external view returns(int256);
+
     function balanceCollateral() external view returns(uint256);
 
     function balanceGEX() external view returns(uint256);
-
-    function mintedGEX() external view returns(int256);
-
+    
+    function blockTimestampLast() external view returns(uint64);
+    
+    function lastCollatPrice() external view returns(uint256);
+    
     function meanPrice() external view returns(uint256);
     
     function lastPrice() external view returns(uint256);
@@ -40,7 +46,7 @@ interface IGenesisLiquidityPool is ICollectible {
     function repayCollateral(uint256 amount) external returns(uint256);
 
     
-    // ++++++++++++++++++++++++  USE FUNCTIONS  +++++++++++++++++++++++++++++
+    // ++++++++++++++++++++++++  USER FUNCTIONS  ++++++++++++++++++++++++++++
     
     function mintSwap(uint256 inCollatAmount, uint256 minOutGEXAmount) external;
 

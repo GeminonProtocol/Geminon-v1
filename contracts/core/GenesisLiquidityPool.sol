@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import "./IGenesisLiquidityPool.sol";
-import "./IGeminonOracle.sol";
-import "../tokens/IERC20Decimals.sol";
-import "../tokens/IERC20ElasticSupply.sol";
+import "./interfaces/IGenesisLiquidityPool.sol";
+import "./interfaces/IGeminonOracle.sol";
+import "../tokens/interfaces/IERC20Decimals.sol";
+import "../tokens/interfaces/IERC20ElasticSupply.sol";
 import "../utils/TradePausable.sol";
 import "../utils/TimeLocks.sol";
 

@@ -2,7 +2,7 @@
  Production code of Geminon Protocol V1
 
 ## Deployment addresses
-The protocol is deployed on Ethereum, BNB and Avalanche networks. Always check that you are interacting with the right address before signing transactions.
+The protocol is deployed on Ethereum, BNB and Avalanche networks. Always check that you are interacting with the right address before signing transactions. Unless otherwise stated, the contract deployment address is the same on all blockchains.
 
 
 ### GEX token
@@ -45,11 +45,26 @@ GEX token is fully collateralized with gold, Bitcoin, Ethereum, BNB and AVAX. We
 The total weight of collateral on each network is therefore: 60% Ethereum, 20% BNB and 20% Avalanche.
 
 
+### Stablecoins Minter
+The SCMinter contract has the mission of minting and redeeming the stablecoins of the Geminon protocol. It also includes the swap module, which allows you to trade stablecoins without slippage.
+* 0xeF0dfe8cF872B4dF3681Ad37A17Ef5e2D473B877
+
+
+### Stablecoins
+#### USDI
+USDI is the flagship of the Geminon stablecoins. It is a dollar indexed to the inflation in the US.
+* 0x4C24e67DC2a00AdA5E90C1E284d2EE4260A21E05
+##### PredictIndex USDI
+The index beacon contract calculates the CPI forecast for the next period and passes that value to the USDI contract so that it can calculate its peg value dynamically.
+* 0x31ac1cc4f770501AdE10E252A6AE27F36D4469Fa
+
+
 ### Oracle
 The Geminon Oracle is used by other contracts for coordination, information and safety checks. It is a critical part of the protocol. Its address is the same on the three chains:
-* 0x2208C74e717df65E367A7dB03B8675627D31ac31
+* 0xa7d3d2bAd28fd928b72283E8a96f6E8D5c5D94e2
 
 
 ### Arbitrage bridge v0
 In order to keep the prices between chains coordinated, we have set up an internal bridge to perform arbitrage. This bridge is temporary, and will be deprecated as soon as the integration of a public bridge is complete.
 * 0xC783565D32517DCC80d0aAA44580ef92dAd224e3
+
