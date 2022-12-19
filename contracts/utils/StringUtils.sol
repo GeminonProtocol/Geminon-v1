@@ -11,7 +11,7 @@ contract StringUtils {
 
     /// @dev Extracts an slice from a string
     function substring(string memory base, int16 _length, int16 offset) 
-        public 
+        internal 
         pure 
         returns (string memory) 
     {
@@ -31,7 +31,7 @@ contract StringUtils {
     }
 
     /// @dev Converts string number to unsigned integer format
-    function stringToUint(string memory s) public pure returns (uint256 result) {
+    function stringToUint(string memory s) internal pure returns (uint256 result) {
         bytes memory b = bytes(s);
         for (uint16 i = 0; i < b.length; i++) {
             if (uint8(b[i]) >= 48 && uint8(b[i]) <= 57) {
@@ -41,7 +41,7 @@ contract StringUtils {
     }
     
     /// @dev Converts a `uint256` to its ASCII `string` decimal representation.
-    function uintToString(uint256 value) public pure returns (string memory) {
+    function uintToString(uint256 value) internal pure returns (string memory) {
         if (value == 0) return "0";
         
         uint256 temp = value;
@@ -67,7 +67,7 @@ contract StringUtils {
         string memory separator, 
         uint16 decimals
     ) 
-        public pure returns(uint256 value) 
+        internal pure returns(uint256 value) 
     {    
         uint16 textDecimals = lenRightSplit(numText, separator);
         if (textDecimals < decimals) decimals -= textDecimals;
@@ -78,7 +78,7 @@ contract StringUtils {
     
     /// @notice Returns the length of the text at the right of needle.
     function lenRightSplit(string memory self, string memory needle) 
-        public 
+        internal 
         pure 
         returns(uint16) 
     {

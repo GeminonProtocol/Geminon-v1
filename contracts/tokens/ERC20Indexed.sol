@@ -136,8 +136,15 @@ contract ERC20Indexed is ERC20ElasticSupply {
 
     /// @notice Get the current value of the peg
     /// @dev Peg is stored using 6 decimals. It needs to be converted to 18 decimals price.
-    function getPegValue() public view returns(uint256) {
+    function getPegValue() public view virtual returns(uint256) {
         return _pegValue() * 1e12;
+    }
+
+
+    /// @notice Calculates the current value of the peg
+    function _pegValue() internal view returns(uint256) {
+        uint256 deltaT = ((block.timestamp - lastTargetTimestamp) * 1e6) / (targetTimestamp - lastTargetTimestamp);
+        return (lastPegTarget + (deltaT * (pegTarget - lastPegTarget)) / 1e6);
     }
 
 
@@ -155,7 +162,8 @@ contract ERC20Indexed is ERC20ElasticSupply {
         lastTargetTimestamp = newTargetTimestamp - 30 days;
         lastPegVarRate = varRate;
 
-        require(block.timestamp > lastTargetTimestamp); // dev: Time travel
+        if (block.timestamp < lastTargetTimestamp) 
+            lastTargetTimestamp = uint64(block.timestamp);
     }
 
 
@@ -235,12 +243,6 @@ contract ERC20Indexed is ERC20ElasticSupply {
         if (newVarRate > maxPegVariation)
             newVarRate = maxPegVariation;
         return (newPegTarget, newVarRate);
-    }
-
-    /// @notice Calculates the current value of the peg
-    function _pegValue() private view returns(uint256) {
-        uint256 deltaT = ((block.timestamp - lastTargetTimestamp) * 1e6) / (targetTimestamp - lastTargetTimestamp);
-        return (lastPegTarget + (deltaT * (pegTarget - lastPegTarget)) / 1e6);
     }
 
     /// @dev safe casting of integer to avoid overflow

@@ -155,7 +155,7 @@ contract PredictIndex is Ownable, DateTimeMath, StringUtils {
         alpha = (2*1e3) / (1+span);
         gamma = (2*1e3) / (1+t_span);
 
-        (smooth, trend) = _applyESAT(observations, alpha, gamma);
+        (smooth, trend) = _applyESAT(CPIValues, alpha, gamma);
 
         setNewReleaseTime(hourRel, minuteRel);
         

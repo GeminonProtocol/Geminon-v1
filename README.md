@@ -3,6 +3,7 @@
 
 ## Deployment addresses
 The protocol is deployed on Ethereum, BNB and Avalanche networks. Always check that you are interacting with the right address before signing transactions. Unless otherwise stated, the contract deployment address is the same on all blockchains.
+* Geminon Protocol Deployer: 0x88d70DEBB940E0bEE526981D99B0f3000E0a3268
 
 
 ### GEX token
@@ -57,6 +58,13 @@ USDI is the flagship of the Geminon stablecoins. It is a dollar indexed to the i
 ##### PredictIndex USDI
 The index beacon contract calculates the CPI forecast for the next period and passes that value to the USDI contract so that it can calculate its peg value dynamically.
 * 0x31ac1cc4f770501AdE10E252A6AE27F36D4469Fa
+
+#### EURI
+EURI is the inflation indexed Euro.
+* 0xcbB00E1f27a59735f390F3263d335A112f10Db8b
+##### PredictIndex EURI
+Calculates the forecast of the HICP that is used by the EURI contract to calculate its peg.
+* 0x842b95dc806745a2B1e0C99a39e0BcF60eC7Ecc2
 
 
 ### Oracle

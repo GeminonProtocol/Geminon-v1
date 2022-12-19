@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "../tokens/interfaces/IERC20ElasticSupply.sol";
 import "../core/interfaces/IGeminonOracle.sol";
+import "./IGeminonBridge.sol";
 
 
 /**
@@ -16,7 +17,7 @@ import "../core/interfaces/IGeminonOracle.sol";
 * value can't be modified: the bridge is designed to deprecate itself as
 * the protocol grows and other ways of arbitrage are available.
 */
-contract BridgeV0 is Ownable, Pausable {
+contract BridgeV1 is IGeminonBridge, Ownable, Pausable {
 
     IERC20ElasticSupply private immutable GEX;
     IGeminonOracle private immutable oracle;
@@ -25,12 +26,18 @@ contract BridgeV0 is Ownable, Pausable {
     address public validator;
 
     uint256 public immutable valueLimit;
-    int256 public balanceVirtualGEX;
+    uint256 public externalTotalSupply;
     
     uint64 private _timestampLastMint;
     int256 private _meanMintRatio;
 
+    mapping(address => uint256) public pendingSends;
     mapping(address => uint256) public claims;
+
+    struct claim {
+        address claimer;
+        uint256 amount;
+    }
 
 
     modifier onlyArbitrageur {
@@ -70,28 +77,31 @@ contract BridgeV0 is Ownable, Pausable {
 
 
     /// @dev Arbitrageur sends GEX through the bridge
-    function sendGEX(uint256 amount) external onlyArbitrageur {
+    function sendGEX(uint256 amount) external {
         _meanDailyAmount(-_toInt256(amount));
 
-        balanceVirtualGEX += int256(amount);
-        GEX.burn(msg.sender, amount);
+        pendingSends[msg.sender] += amount;
+        GEX.transferFrom(msg.sender, address(this), amount);
     }
 
     /// @dev Arbitrageur claims GEX sent from other chain
-    function claimGEX(uint256 amount) external onlyArbitrageur {
-        require(claims[msg.sender] >= amount); // dev: Invalid claim
+    function claimGEX(uint256 amount) external {
+        require(claims[msg.sender] >= amount, 'Invalid claim');
         _requireMaxMint(amount);
 
-        balanceVirtualGEX -= int256(amount);
+        
         claims[msg.sender] -= amount;
         GEX.mint(msg.sender, amount);
     }
 
 
     /// @dev Validator validates the bridge transaction
-    function validateClaim(address claimer, uint256 amount) external onlyValidator {
-        require(claimer == arbitrageur); // dev: claimer is not the arbitrageur
-        claims[claimer] += amount;
+    function validateClaims(claim[] calldata newClaims) external onlyValidator {
+        claim memory newClaim;
+        for(uint16 i=0; i<newClaims.length; i++) {
+            newClaim = newClaims[i]; 
+            claims[newClaim.claimer] += newClaim.amount;
+        }   
     }
 
     /// @dev Calculates max amount that can be minted by the bridge to not pass the daily limit
@@ -104,7 +114,7 @@ contract BridgeV0 is Ownable, Pausable {
         return amount > 0 ? uint256(amount) : 0;
     }
 
-
+    
     /// @dev Checks that the amount minted is not higher than the max allowed
     function _requireMaxMint(uint256 amount) private {
         uint256 price = oracle.getSafePrice();
