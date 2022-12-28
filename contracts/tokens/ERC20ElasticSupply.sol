@@ -21,7 +21,7 @@ contract ERC20ElasticSupply is ERC20, Ownable, TimeLocks {
     uint32 public baseMintRatio;
     uint256 public thresholdLimitMint;
     uint64 private _timestampLastMint;
-    int256 private _meanMintRatio;
+    int256 internal _meanMintRatio;
 
     mapping(address => bool) public minters;
 
@@ -92,7 +92,7 @@ contract ERC20ElasticSupply is ERC20, Ownable, TimeLocks {
     }
 
     /// @notice Calculates the max amount of the token that can be minted
-    function maxAmountMintable() public view returns(uint256) {
+    function maxAmountMintable() public view virtual returns(uint256) {
         int256 maxDailyMintable = _toInt256(_maxMintRatio()*totalSupply()) / 1e3;
         (int256 w, int256 w2) = _weightsMean();
         int256 maxAmount = (1e6*maxDailyMintable - w2*_meanMintRatio)/w;
@@ -103,17 +103,17 @@ contract ERC20ElasticSupply is ERC20, Ownable, TimeLocks {
     /// only when a total supply level has been reached.
     function _requireMaxMint(uint256 amount) internal virtual {
         if (totalSupply() > thresholdLimitMint) {
-            int256 maxDailyMintable = _toInt256(_maxMintRatio()*totalSupply()) / 1e3;
+            uint256 maxDailyMintable = (_maxMintRatio()*totalSupply()) / 1e3;
             require(_meanDailyAmount(_toInt256(amount)) <= maxDailyMintable, 'Max mint rate');
         }
     }
 
     /// @dev Calculates an exponential moving average that tracks the amount 
     /// of tokens minted in the last 24 hours.
-    function _meanDailyAmount(int256 amount) internal returns(int256) {
+    function _meanDailyAmount(int256 amount) internal returns(uint256) {
         (int256 w, int256 w2) = _weightsMean();
         _meanMintRatio = (w*amount + w2*_meanMintRatio) / 1e6;
-        return _meanMintRatio;
+        return _meanMintRatio > 0 ? uint256(_meanMintRatio) : 0;
     }
 
 
@@ -153,7 +153,7 @@ contract ERC20ElasticSupply is ERC20, Ownable, TimeLocks {
 
 
     /// @dev Calculates the weights of the mean of the mint ratio
-    function _weightsMean() private view returns(int256 w, int256 w2) {
+    function _weightsMean() internal view returns(int256 w, int256 w2) {
         int256 elapsed = _toInt256(block.timestamp - _timestampLastMint);
         
         if (elapsed > 0) {
