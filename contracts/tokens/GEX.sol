@@ -16,7 +16,7 @@ import "./ERC20ElasticSupply.sol";
 contract GEX is ERC20ElasticSupply {
 
     bool public isInitialized;
-    int256 public supplyLimitMint;
+    uint256 public supplyLimitMint;
 
     
     /// @notice Mint is limited to 5 million tokens per day through the 

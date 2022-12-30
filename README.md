@@ -74,10 +74,14 @@ USDG is the Geminon US Dollar stablecoin
 EURG is the Geminon Euro stablecoin
 * 0x38f8058b4dF45E8451d10f40343DBAaeCAE620cF
 
+#### CNYG
+CNYG is the Geminon Chinese Yuan Renminbi stablecoin
+* 0x52644C661Bd2436C0a620Cf11b617276b8c7C2D1
+
 
 ### Oracle
 The Geminon Oracle is used by other contracts for coordination, information and safety checks. It is a critical part of the protocol. Its address is the same on the three chains:
-* 0x2208C74e717df65E367A7dB03B8675627D31ac31 (deprecated)
+* 0x2208C74e717df65E367A7dB03B8675627D31ac31 (deprecated)  
 Second version:
 * 0xa7d3d2bAd28fd928b72283E8a96f6E8D5c5D94e2
 

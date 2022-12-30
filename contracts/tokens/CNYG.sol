@@ -7,18 +7,18 @@ import "./ERC20ElasticSupply.sol";
 
 
 /**
-* @title CNHG
+* @title CNYG
 * @author Geminon Protocol
-* @notice Offshore Chinese Yuan Stablecoin
+* @notice Chinese Yuan Renminbi Stablecoin
 */
-contract CNHG is ERC20ElasticSupply {
+contract CNYG is ERC20ElasticSupply {
 
     address public priceFeed;
     uint8 public priceFeedDecimals;
     bool public isInitialized;
 
     
-    constructor(address priceFeed_) ERC20ElasticSupply("Geminon Chinese Yuan", "CNHG", 50, 1e24) {
+    constructor(address priceFeed_) ERC20ElasticSupply("Geminon Renminbi", "CNYG", 50, 1e24) {
         priceFeed = priceFeed_;
         priceFeedDecimals = AggregatorV3Interface(priceFeed).decimals();
         isInitialized = false;
